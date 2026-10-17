@@ -26,7 +26,34 @@ namespace sof::engine {
 	// Calls `TESObjectLAND::GetLandHeight` (0x53F180) for the land of that cell. (JIP, JG; EXE: ret 8)
 	constexpr std::uintptr_t kTES_GetLandHeight = 0x4572E0;
 
+	// TES
+	constexpr std::uintptr_t kTES_GridCellArray = 0x08;  // GridCellArray* (JIP, TSTG)
+	constexpr std::uintptr_t kGridCellArray_GridSize = 0x0C;  // UInt32, uGridsToLoad (JIP)
+	constexpr std::uintptr_t kGridCellArray_Cells = 0x10;  // TESObjectCELL*[gridSize * gridSize] (JIP)
+
+	// TESObjectCELL
+	constexpr std::uintptr_t kCell_Flags = 0x24;  // UInt8, bit 0 = interior (JIP)
+	constexpr std::uintptr_t kCell_LoadingStage = 0x26;  // UInt8, 6 = attached (JIP)
+	constexpr std::uintptr_t kCell_ExteriorCoords = 0x48;  // CellCoord* {SInt32 x, y}, exteriors only (JIP)
+	constexpr std::uintptr_t kCell_ObjectList = 0xAC;  // tList<TESObjectREFR>, first node inline (JIP)
+	constexpr std::uintptr_t kCell_WorldSpace = 0xC0;  // TESWorldSpace*, null for interiors (JIP, TSTG)
+	constexpr std::uint8_t kCellFlag_Interior = 0x01;
+	constexpr std::uint8_t kCellStage_Attached = 6;
+
+	// tList node
+	constexpr std::uintptr_t kListNode_Data = 0x00;
+	constexpr std::uintptr_t kListNode_Next = 0x04;
+
 	// TESForm
+	constexpr std::uintptr_t kForm_Flags = 0x08;  // UInt32 (JIP)
+	constexpr std::uint32_t kFormFlag_Deleted = 0x20;  // (JIP kFlags_Deleted)
+	constexpr std::uint32_t kFormFlag_Disabled = 0x800;  // (JIP GetDisabled tests byte +9 bit 3)
+
+	// bool __cdecl(TESObjectREFR*). Each checks a global reference set under a lock (0x11CACF8). (JIP GetDisabled; EXE)
+	// With the disabled flag: disabled unless in the first set (0x11CACA8), else the second set decides.
+	// Without the flag: the second set (0x11CACE8) decides. Covers references disabled by an enable parent.
+	constexpr std::uintptr_t kRefr_InFlaggedEnabledSet = 0x5AA680;
+	constexpr std::uintptr_t kRefr_InDisabledSet = 0x5AA630;
 	constexpr std::uintptr_t kForm_TypeID = 0x04;  // UInt8
 	constexpr std::uintptr_t kForm_RefID = 0x0C;
 	constexpr std::uintptr_t kFormVtbl_GetEditorID = 0x130;  // const char* (__thiscall*)() (JIP)
@@ -56,6 +83,9 @@ namespace sof::engine {
 	// TESObjectREFR
 	constexpr std::uintptr_t kRefr_BaseForm = 0x20;  // TESForm* (JIP)
 	constexpr std::uintptr_t kRefr_Position = 0x30;  // NiVector3 (JIP)
+	constexpr std::uintptr_t kRefr_ParentCell = 0x40;  // TESObjectCELL* (JIP)
+	constexpr std::uintptr_t kRefr_RenderState = 0x64;  // RenderState*, null without loaded 3D (JIP)
+	constexpr std::uintptr_t kRenderState_RootNode = 0x14;  // NiNode* (JIP)
 
 	// Actor
 	constexpr std::uintptr_t kActor_BaseProcess = 0x68;  // BaseProcess* (JIP)
@@ -71,6 +101,7 @@ namespace sof::engine {
 	// Scene graph
 	constexpr std::uintptr_t kSceneGraph_Camera = 0xAC;  // NiCamera* (JIP; NiNode is 0xAC bytes)
 	constexpr std::uintptr_t kNiObject_Parent = 0x18;  // NiNode* (JIP NiAVObject)
+	constexpr std::uintptr_t kNiObject_WorldBound = 0x20;  // NiBound* {NiPoint3 center, float radius} (JIP)
 	constexpr std::uintptr_t kNiObject_WorldRotate = 0x68;  // NiMatrix33, row major (JIP)
 	constexpr std::uintptr_t kNiObject_WorldTranslate = 0x8C;  // NiVector3 (JIP)
 	constexpr std::uintptr_t kVtbl_BSFadeNode = 0x10A8F90;  // (JIP)
