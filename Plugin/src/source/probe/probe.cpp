@@ -1,7 +1,7 @@
 // Probe rays for single grid points.
 //
 // A probe casts down from the probe height above the terrain to just below the terrain.
-// The grid point is occluded if the ray hits an occluder before the terrain.
+// The grid point is occluded if the ray hits an occluder before the land.
 // A ray that starts inside an occluder's collision misses it (Experimental Acoustics finding).
 // So a probe that finds nothing on the way down casts up again from just above the terrain.
 
@@ -31,13 +31,15 @@ namespace sof::probe {
 		// Hits per ray before the probe gives up on that ray. Clutter and actors on top of a floor add hits.
 		constexpr int kMaxHitsPerRay = 8;
 
+		// Returns the role of a hit. The reference decides before the layer.
+		// Land collision has no reference and uses layer `Ground`.
 		HitKind ClassifyHit(const engine::RaycastResult& hit) {
-			if (hit.layer == engine::kLayer_Terrain) {
-				return HitKind::Terrain;
-			}
-
 			if (IsOccluder(hit.reference)) {
 				return HitKind::Occluder;
+			}
+
+			if (!hit.reference && (hit.layer == engine::kLayer_Ground || hit.layer == engine::kLayer_Terrain)) {
+				return HitKind::Terrain;
 			}
 
 			return HitKind::Passed;
