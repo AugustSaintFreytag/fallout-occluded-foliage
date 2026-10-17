@@ -66,6 +66,9 @@ namespace sof::config {
 
 			const float budget = ReadFloat(iniPath, "Probe", "fBudget", probe.budget);
 			probe.budget = std::clamp(budget, 0.0f, 5.0f);
+
+			const float radius = ReadFloat(iniPath, "Probe", "fRadius", probe.radius);
+			probe.radius = std::clamp(radius, 512.0f, 16384.0f);
 		}
 
 		void LoadDebug(const char* iniPath, Settings& settings) {
@@ -73,12 +76,18 @@ namespace sof::config {
 
 			debug.reloadKey = ReadInt(iniPath, "Debug", "iReloadKey", debug.reloadKey);
 			debug.probeKey = ReadInt(iniPath, "Debug", "iProbeKey", debug.probeKey);
+			debug.grassCensusKey = ReadInt(iniPath, "Debug", "iGrassCensusKey", debug.grassCensusKey);
+			debug.grassHideTestKey = ReadInt(iniPath, "Debug", "iGrassHideTestKey", debug.grassHideTestKey);
+			debug.logMap = ReadBool(iniPath, "Debug", "bLogMap", debug.logMap);
 		}
 
 		void LogSettings(const Settings& settings) {
 			SOF_LOG("Config general: Enabled=%d", settings.general.enabled);
-			SOF_LOG("Config probe: ProbeHeight=%.0f Budget=%.2fms", settings.probe.probeHeight, settings.probe.budget);
-			SOF_LOG("Config debug: ReloadKey=0x%X ProbeKey=0x%X", settings.debug.reloadKey, settings.debug.probeKey);
+			SOF_LOG("Config probe: ProbeHeight=%.0f Budget=%.2fms Radius=%.0f", settings.probe.probeHeight, settings.probe.budget,
+				settings.probe.radius);
+			SOF_LOG("Config debug: ReloadKey=0x%X ProbeKey=0x%X GrassCensusKey=0x%X GrassHideTestKey=0x%X LogMap=%d",
+				settings.debug.reloadKey, settings.debug.probeKey, settings.debug.grassCensusKey, settings.debug.grassHideTestKey,
+				settings.debug.logMap);
 		}
 
 		// Reads the INI from `Load` into fresh settings. A missing key keeps its default.
