@@ -88,7 +88,7 @@ namespace sof::probe {
 
 	}
 
-	const char* VerdictName(Verdict verdict) {
+	const char* DescriptionForVerdict(Verdict verdict) {
 		switch (verdict) {
 		case Verdict::Clear:
 			return "Clear";

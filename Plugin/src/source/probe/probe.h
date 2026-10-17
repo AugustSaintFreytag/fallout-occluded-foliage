@@ -40,7 +40,7 @@ namespace sof::probe {
 		int casts = 0;
 	};
 
-	const char* VerdictName(Verdict verdict);
+	const char* DescriptionForVerdict(Verdict verdict);
 
 	bool IsOccluder(void* reference);
 
