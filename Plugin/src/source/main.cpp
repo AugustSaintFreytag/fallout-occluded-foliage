@@ -4,6 +4,7 @@
 
 #include "config/settings.h"
 #include "input/hotkeys.h"
+#include "occlusion/builder.h"
 #include "utils/log.h"
 #include "utils/threads.h"
 
@@ -21,14 +22,21 @@ namespace {
 		case NVSEMessagingInterface::kMessage_MainGameLoop:
 			sof::threads::RememberMainThread();
 			sof::input::PollHotkeys();
+
+			if (sof::config::Get().general.enabled) {
+				sof::occlusion::UpdateBuilder();
+			}
+
 			break;
 
 		case NVSEMessagingInterface::kMessage_PostLoadGame:
 			SOF_LOG("Game loaded.");
+			sof::occlusion::ResetBuilder();
 			break;
 
 		case NVSEMessagingInterface::kMessage_ExitToMainMenu:
 			SOF_LOG("Exited to main menu.");
+			sof::occlusion::ResetBuilder();
 			break;
 
 		default:

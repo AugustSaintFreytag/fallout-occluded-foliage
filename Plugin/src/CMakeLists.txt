@@ -26,6 +26,9 @@ add_library(OccludedFoliage SHARED
 
 	source/input/hotkeys.cpp
 
+	source/occlusion/builder.cpp
+	source/occlusion/map.cpp
+
 	source/probe/probe.cpp
 
 	source/utils/log.cpp
