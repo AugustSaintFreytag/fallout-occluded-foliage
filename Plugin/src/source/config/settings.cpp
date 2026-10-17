@@ -72,12 +72,13 @@ namespace sof::config {
 			DebugSettings& debug = settings.debug;
 
 			debug.reloadKey = ReadInt(iniPath, "Debug", "iReloadKey", debug.reloadKey);
+			debug.probeKey = ReadInt(iniPath, "Debug", "iProbeKey", debug.probeKey);
 		}
 
 		void LogSettings(const Settings& settings) {
 			SOF_LOG("Config general: Enabled=%d", settings.general.enabled);
 			SOF_LOG("Config probe: ProbeHeight=%.0f Budget=%.2fms", settings.probe.probeHeight, settings.probe.budget);
-			SOF_LOG("Config debug: ReloadKey=0x%X", settings.debug.reloadKey);
+			SOF_LOG("Config debug: ReloadKey=0x%X ProbeKey=0x%X", settings.debug.reloadKey, settings.debug.probeKey);
 		}
 
 		// Reads the INI from `Load` into fresh settings. A missing key keeps its default.

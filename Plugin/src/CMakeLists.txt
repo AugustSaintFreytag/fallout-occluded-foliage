@@ -13,11 +13,20 @@ add_library(OccludedFoliage SHARED
 
 	source/config/settings.cpp
 
+	source/debug/crosshair_probe.cpp
+
+	source/engine/havok.cpp
+	source/engine/objects.cpp
+	source/engine/scene.cpp
+	source/engine/terrain.cpp
 	source/engine/ui.cpp
 
 	source/input/hotkeys.cpp
 
+	source/probe/probe.cpp
+
 	source/utils/log.cpp
+	source/utils/memory.cpp
 	source/utils/threads.cpp
 )
 

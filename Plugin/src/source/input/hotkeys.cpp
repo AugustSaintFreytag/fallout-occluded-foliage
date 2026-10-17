@@ -1,6 +1,7 @@
 #include "input/hotkeys.h"
 
 #include "config/settings.h"
+#include "debug/crosshair_probe.h"
 #include "engine/ui.h"
 
 #include <Windows.h>
@@ -11,6 +12,7 @@ namespace sof::input {
 
 		// Thread: Main
 		bool g_reloadKeyWasDown = false;
+		bool g_probeKeyWasDown = false;
 
 		bool GameHasFocus() {
 			DWORD foregroundProcessId = 0;
@@ -45,6 +47,19 @@ namespace sof::input {
 			engine::ShowNotification("Occluded Foliage Settings: Reloaded");
 		}
 
+		// Probes the grid point under the crosshair on `[Debug] iProbeKey`.
+		void PollProbeKey() {
+			const int probeKey = config::Get().debug.probeKey;
+
+			if (!probeKey) {
+				return;
+			}
+
+			if (WasPressed(probeKey, g_probeKeyWasDown)) {
+				debug::RunCrosshairProbe();
+			}
+		}
+
 	}
 
 	// Polls the hotkeys and runs the action of each key that went down. Only while the game window has focus.
@@ -52,6 +67,7 @@ namespace sof::input {
 	// Thread: Main (each frame)
 	void PollHotkeys() {
 		PollReloadKey();
+		PollProbeKey();
 	}
 
 }
