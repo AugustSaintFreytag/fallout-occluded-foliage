@@ -64,7 +64,8 @@ namespace sof::debug {
 	}
 
 	// Probes the grid point under the crosshair and logs every hit of the probe rays.
-	// Logs the verdict, the deciding occluder, the casts and the time. Shows the verdict as a corner message.
+	// Logs the verdict, the deciding occluder, the casts and the time of a probe without logging.
+	// Shows the verdict as a corner message.
 	//
 	// The point is where a view ray from the camera first hits anything.
 	// The probe runs at that point's position, as it would for a grid point there.
@@ -97,8 +98,11 @@ namespace sof::debug {
 		SOF_LOG("[Probe] Point (%.1f, %.1f, %.1f), Layer %u (%s), %s. Probe height %.0f:", aim.point.x, aim.point.y,
 			aim.point.z, aim.layer, engine::CollisionLayerName(aim.layer), aimText, probeHeight);
 
-		const std::int64_t startTime = timing::Now();
 		const probe::ProbeResult result = probe::ProbePoint(aim.point.x, aim.point.y, probeHeight, LogTraceHit);
+
+		// Time a second probe without the trace. Log writes in the trace take longer than the casts.
+		const std::int64_t startTime = timing::Now();
+		probe::ProbePoint(aim.point.x, aim.point.y, probeHeight);
 		const double microseconds = timing::TicksToMicroseconds(static_cast<double>(timing::Now() - startTime));
 
 		char occluderText[320];
