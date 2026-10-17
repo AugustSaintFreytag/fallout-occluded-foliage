@@ -2,6 +2,7 @@
 
 #include "config/settings.h"
 #include "debug/crosshair_probe.h"
+#include "debug/grass_census.h"
 #include "engine/ui.h"
 
 #include <Windows.h>
@@ -13,6 +14,8 @@ namespace sof::input {
 		// Thread: Main
 		bool g_reloadKeyWasDown = false;
 		bool g_probeKeyWasDown = false;
+		bool g_grassCensusKeyWasDown = false;
+		bool g_grassHideTestKeyWasDown = false;
 
 		bool GameHasFocus() {
 			DWORD foregroundProcessId = 0;
@@ -60,6 +63,32 @@ namespace sof::input {
 			}
 		}
 
+		// Logs the grass geometry on `[Debug] iGrassCensusKey`.
+		void PollGrassCensusKey() {
+			const int grassCensusKey = config::Get().debug.grassCensusKey;
+
+			if (!grassCensusKey) {
+				return;
+			}
+
+			if (WasPressed(grassCensusKey, g_grassCensusKeyWasDown)) {
+				debug::RunGrassCensus();
+			}
+		}
+
+		// Hides or restores the nearest grass geometry on `[Debug] iGrassHideTestKey`.
+		void PollGrassHideTestKey() {
+			const int grassHideTestKey = config::Get().debug.grassHideTestKey;
+
+			if (!grassHideTestKey) {
+				return;
+			}
+
+			if (WasPressed(grassHideTestKey, g_grassHideTestKeyWasDown)) {
+				debug::ToggleGrassHideTest();
+			}
+		}
+
 	}
 
 	// Polls the hotkeys and runs the action of each key that went down. Only while the game window has focus.
@@ -68,6 +97,8 @@ namespace sof::input {
 	void PollHotkeys() {
 		PollReloadKey();
 		PollProbeKey();
+		PollGrassCensusKey();
+		PollGrassHideTestKey();
 	}
 
 }

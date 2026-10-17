@@ -5,6 +5,7 @@
 #include "engine/objects.h"
 #include "engine/scene.h"
 #include "engine/ui.h"
+#include "occlusion/map.h"
 #include "probe/probe.h"
 #include "utils/log.h"
 #include "utils/timing.h"
@@ -19,6 +20,19 @@ namespace sof::debug {
 
 		// Length of the view ray that finds the point under the crosshair.
 		constexpr float kAimRange = 8192.0f;  // Game units
+
+		const char* PointStateName(occlusion::PointState state) {
+			switch (state) {
+			case occlusion::PointState::Clear:
+				return "clear";
+
+			case occlusion::PointState::Occluded:
+				return "occluded";
+
+			default:
+				return "unknown";
+			}
+		}
 
 		const char* HitKindName(probe::HitKind kind) {
 			switch (kind) {
@@ -108,11 +122,12 @@ namespace sof::debug {
 		char occluderText[320];
 		DescribeReference(result.occluder, occluderText, sizeof(occluderText));
 
-		SOF_LOG("[Probe] %s%s, terrain at %.1f, %d casts, %.1f us. Occluder: %s", probe::VerdictName(result.verdict),
-			result.foundByUpRay ? " (up ray)" : "", result.terrainHeight, result.casts, microseconds, occluderText);
+		SOF_LOG("[Probe] %s%s, terrain at %.1f, %d casts, %.1f us. Map: %s. Occluder: %s", probe::DescriptionForVerdict(result.verdict),
+			result.foundByUpRay ? " (up ray)" : "", result.terrainHeight, result.casts, microseconds,
+			PointStateName(occlusion::Query(aim.point.x, aim.point.y)), occluderText);
 
 		char notification[96];
-		std::snprintf(notification, sizeof(notification), "Probe: %s%s", probe::VerdictName(result.verdict),
+		std::snprintf(notification, sizeof(notification), "Probe: %s%s", probe::DescriptionForVerdict(result.verdict),
 			result.foundByUpRay ? " (up ray)" : "");
 		engine::ShowNotification(notification);
 	}
