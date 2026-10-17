@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace sof::mem {
@@ -17,5 +18,7 @@ namespace sof::mem {
 	}
 
 	bool SafeRead32(const void* address, std::uint32_t& out);
+
+	bool SafeReadBytes(const void* address, void* out, std::size_t size);
 
 }
