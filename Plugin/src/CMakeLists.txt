@@ -15,6 +15,8 @@ add_library(OccludedFoliage SHARED
 
 	source/debug/crosshair_probe.cpp
 
+	source/engine/cells.cpp
+	source/engine/grass.cpp
 	source/engine/havok.cpp
 	source/engine/objects.cpp
 	source/engine/scene.cpp
