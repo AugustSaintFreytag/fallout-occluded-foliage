@@ -1,0 +1,7 @@
+*.code-workspace
+.vscode
+
+/References
+/Documentation
+
+/Plugin/src/build
