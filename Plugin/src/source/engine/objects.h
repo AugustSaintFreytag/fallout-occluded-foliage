@@ -7,6 +7,7 @@
 namespace sof::engine {
 
 	void* GetPlayer();
+	void* GetParentCell(void* reference);
 
 	const char* GetEditorID(void* form);
 

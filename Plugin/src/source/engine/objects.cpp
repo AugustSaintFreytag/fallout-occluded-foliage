@@ -11,6 +11,14 @@ namespace sof::engine {
 		return mem::Global<void*>(kPlayerSingleton);
 	}
 
+	void* GetParentCell(void* reference) {
+		if (!reference) {
+			return nullptr;
+		}
+
+		return Field<void*>(reference, kRefr_ParentCell);
+	}
+
 	// Returns the editor ID of a given form, or an empty string.
 	// IDs of most forms are not available without JohnnyGuitar NVSE.
 	const char* GetEditorID(void* form) {
