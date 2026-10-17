@@ -76,6 +76,43 @@ namespace sof::engine {
 	constexpr std::uintptr_t kVtbl_BSFadeNode = 0x10A8F90;  // (JIP)
 	constexpr std::uintptr_t kFadeNode_Reference = 0xCC;  // TESObjectREFR*, can be null (JIP NiAVObject::GetParentRef)
 
+	// NiAVObject, NiNode
+	// NiObject vtable: 0 destructor, 1 `DeleteThis` (0xCFCC20, shared), 2 `GetRTTI`, 3 `IsNode`. (EXE)
+	constexpr std::uintptr_t kNiObjectVtbl_IsNode = 0x0C;  // NiNode* (__thiscall*)(), null for other objects (EXE)
+	constexpr std::uintptr_t kNiObject_WorldScale = 0x98;  // float (JIP NiTransform after rotate and translate)
+	constexpr std::uintptr_t kNiNode_Children = 0xA0;  // NiTArray<NiAVObject*>::data (JIP m_children at 0x9C)
+	constexpr std::uintptr_t kNiNode_ChildrenEnd = 0xA6;  // UInt16, NiTArray::firstFreeEntry (JIP)
+
+	// Grass
+	// Root node of all grass geometry. The grass manager (0x57D0A0) creates it, attaches it and updates it. (EXE)
+	constexpr std::uintptr_t kGrassRootNode = 0x11CA438;  // NiNode*
+
+	constexpr std::uintptr_t kVtbl_TallGrassTriStrips = 0x10BCC90;  // GetRTTI 0xC1A3A0 returns NiRTTI 0x12024B8 (EXE)
+	constexpr std::uintptr_t kVtbl_TallGrassTriShape = 0x10BCDC8;  // GetRTTI 0xC1A650 returns NiRTTI 0x12024C0 (EXE)
+
+	constexpr std::uintptr_t kGeometry_ShaderProperty = 0xA8;  // BSShaderProperty*, NiPropertyState at +0x9C, shade at +0x0C (JIP, EXE)
+	constexpr std::uintptr_t kShaderProperty_Type = 0x1C;  // UInt32, 4 = TallGrass (JIP)
+	constexpr std::uintptr_t kShaderProperty_Flags2 = 0x24;  // UInt32, bit 11 = UNIFORM_SCALE for grass (JG, EXE: 0xBACB73)
+	constexpr std::uint32_t kShaderType_TallGrass = 4;
+
+	// TallGrassShaderProperty (0x98 bytes, EXE: 0xB60F50). Its clone copies the record pointer raw (EXE: 0xB60B04).
+	constexpr std::uintptr_t kGrassProperty_Record = 0x7C;  // Instance record
+
+	// Instance record, one per cell and grass type. Pooled: the game reinitializes a record for another cell (0xBD8B00).
+	// `0xBAAF40` copies capacity × 16 bytes from the array into the shader constants on every draw.
+	// With fewer instances than the capacity, the primitive count becomes instances × triangles per instance. (EXE)
+	constexpr std::uintptr_t kGrassRecord_Capacity = 0x10;  // UInt16, 228 in game (RUN)
+	constexpr std::uintptr_t kGrassRecord_InstanceCount = 0x12;  // UInt16, entries past it are stale (RUN)
+	constexpr std::uintptr_t kGrassRecord_Instances = 0x14;  // float[4] per instance, world position in xyz (RUN), c20[a0.x] (TSTG)
+	constexpr std::uintptr_t kGrassRecord_Keys = 0x18;  // void*[capacity], one key per instance (EXE)
+	constexpr std::uintptr_t kGrassRecord_CellX = 0x3C;  // SInt32 (EXE: 0xBD8B77, RUN)
+	constexpr std::uintptr_t kGrassRecord_CellY = 0x40;  // SInt32 (EXE: 0xBD8B7A, RUN)
+
+	// bool __thiscall AddInstance(record, const float[4]* instance, void* key). Appends one instance, false when full.
+	// Only call site: the scatter loop at 0xB62FC1, which seeds `rand` from the position of each grass point. (EXE: ret 8)
+	constexpr std::uintptr_t kGrassRecord_AddInstance = 0xBD8550;
+	constexpr std::uintptr_t kGrassAddInstanceCall = 0xB62FC1;
+
 	// Havok
 	constexpr float kHavokScale = 0.1428571f;  // Game units -> Havok units (1/7) (JIP kUnitConv)
 	constexpr std::uintptr_t kCdBody_Parent = 0x0C;  // hkCdBody*, null for the root collidable (JIP)
