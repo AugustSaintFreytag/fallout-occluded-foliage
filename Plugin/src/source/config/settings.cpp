@@ -88,6 +88,7 @@ namespace sof::config {
 			debug.grassHideTestKey = ReadInt(iniPath, "Debug", "iGrassHideTestKey", debug.grassHideTestKey);
 			debug.logMap = ReadBool(iniPath, "Debug", "bLogMap", debug.logMap);
 			debug.probePhysics = ReadBool(iniPath, "Debug", "bProbePhysics", debug.probePhysics);
+			debug.liftGrass = ReadBool(iniPath, "Debug", "bLiftGrass", debug.liftGrass);
 
 			const float physicsProbeDelay = ReadFloat(iniPath, "Debug", "fPhysicsProbeDelay", debug.physicsProbeDelay);
 			debug.physicsProbeDelay = std::clamp(physicsProbeDelay, 0.0f, 50.0f);
