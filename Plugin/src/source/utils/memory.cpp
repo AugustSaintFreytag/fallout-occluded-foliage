@@ -34,4 +34,23 @@ namespace sof::mem {
 		}
 	}
 
+	// Replaces a pointer in read-only memory, such as a vtable slot.
+	// Returns the previous value, or null if the replacement failed.
+	//
+	// Thread: Main (load time only)
+	void* PatchPointer(std::uintptr_t slot, void* replacement) {
+		auto* target = reinterpret_cast<void**>(slot);
+		DWORD oldProtection = 0;
+
+		if (!VirtualProtect(target, sizeof(void*), PAGE_READWRITE, &oldProtection)) {
+			return nullptr;
+		}
+
+		void* previous = *target;
+		*target = replacement;
+		VirtualProtect(target, sizeof(void*), oldProtection, &oldProtection);
+
+		return previous;
+	}
+
 }

@@ -21,4 +21,6 @@ namespace sof::mem {
 
 	bool SafeReadBytes(const void* address, void* out, std::size_t size);
 
+	void* PatchPointer(std::uintptr_t slot, void* replacement);
+
 }
