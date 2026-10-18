@@ -12,8 +12,8 @@ namespace sof::config {
 		bool enabled = true;
 
 		// Keybind that toggles `enabled` until the next reload
-		// Virtual-key code (VK_END), 0 = no key
-		int toggleKey = 0x23;
+		// DirectInput scan code (DIK_END), 0 = no key
+		int toggleKey = 0xCF;
 	};
 
 	struct ProbeSettings {
@@ -44,20 +44,20 @@ namespace sof::config {
 
 	struct DebugSettings {
 		// Keybind that reloads the config
-		// Virtual-key code (VK_INSERT), 0 = no key
-		int reloadKey = 0x2D;
+		// DirectInput scan code (DIK_INSERT), 0 = no key
+		int reloadKey = 0xD2;
 
 		// Keybind that probes the grid point under the crosshair and logs every hit
-		// Virtual-key code (VK_HOME), 0 = no key
-		int probeKey = 0x24;
+		// DirectInput scan code (DIK_HOME), 0 = no key
+		int probeKey = 0xC7;
 
 		// Keybind that logs every grass geometry with its instance record
-		// Virtual-key code (VK_PRIOR), 0 = no key
-		int grassCensusKey = 0x21;
+		// DirectInput scan code (DIK_PRIOR), 0 = no key
+		int grassCensusKey = 0xC9;
 
 		// Keybind that hides the instances of the nearest grass geometry, and restores them on the next press
-		// Virtual-key code (VK_NEXT), 0 = no key
-		int grassHideTestKey = 0x22;
+		// DirectInput scan code (DIK_NEXT), 0 = no key
+		int grassHideTestKey = 0xD1;
 
 		// Log cell probing status individually and a regular status report.
 		bool logMap = false;

@@ -8,6 +8,9 @@
 
 #include <Windows.h>
 
+// In-game keys, read with `GetAsyncKeyState` while the game window has focus.
+// The INI gives keys as DirectInput scan codes, as in the GECK and NVSE `IsKeyPressed`.
+
 namespace sof::input {
 
 	namespace {
@@ -26,9 +29,24 @@ namespace sof::input {
 			return foregroundProcessId == GetCurrentProcessId();
 		}
 
-		// Checks if the given key went down since the last poll. Updates the given key state.
-		bool WasPressed(int key, bool& keyWasDown) {
-			const bool keyIsDown = (GetAsyncKeyState(key) & 0x8000) != 0 && GameHasFocus();
+		// Returns the Windows virtual-key code of a DirectInput scan code.
+		// Returns 0 if the scan code has no virtual-key code.
+		//
+		// Reference at "Intersection Shader/Plugin/Source/Hotkeys.cpp", "GetVirtualKey".
+		UINT GetVirtualKey(int scanCode) {
+			// DirectInput sets bit 7 for keys sent with the E0 prefix, e.g. arrow keys and right Ctrl.
+			// `MapVirtualKey` takes these keys with the prefix in the high byte.
+			const UINT prefixedScanCode = scanCode & 0x80 ? 0xE000 | (scanCode & 0x7F) : scanCode;
+
+			return MapVirtualKeyA(prefixedScanCode, MAPVK_VSC_TO_VK_EX);
+		}
+
+		// Checks if the key with the given DirectInput scan code went down since the last poll.
+		// Updates the given key state.
+		bool WasPressed(int scanCode, bool& keyWasDown) {
+			const UINT virtualKey = scanCode > 0 && scanCode < 0x100 ? GetVirtualKey(scanCode) : 0;
+			const bool keyIsDown =
+				virtualKey != 0 && (GetAsyncKeyState(static_cast<int>(virtualKey)) & 0x8000) != 0 && GameHasFocus();
 			const bool keyWentDown = keyIsDown && !keyWasDown;
 
 			keyWasDown = keyIsDown;
