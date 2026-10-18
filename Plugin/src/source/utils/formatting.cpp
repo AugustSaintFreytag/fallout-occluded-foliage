@@ -33,9 +33,9 @@ namespace sof::format {
 		char text[32];
 
 		if (total < 60) {
-			std::snprintf(text, sizeof(text), "%llu s", total);
+			std::snprintf(text, sizeof(text), "%llus", total);
 		} else {
-			std::snprintf(text, sizeof(text), "%llu min %llu s", total / 60, total % 60);
+			std::snprintf(text, sizeof(text), "%llum %llus", total / 60, total % 60);
 		}
 
 		return text;
