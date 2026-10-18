@@ -64,6 +64,8 @@ namespace sof::engine {
 	// Form IDs below are engine built-ins, such as `XMarker` (0x3B), `MapMarker` (0x10) and `CollisionMarker` (0x21). (RUN)
 	constexpr std::uint32_t kPluginHeadFormID = 0x800;
 	constexpr std::uintptr_t kFormVtbl_GetEditorID = 0x130;  // const char* (__thiscall*)() (JIP)
+	// TESForm* __cdecl TESForm::GetFormByEditorID(const char*). Looks up the editor ID map at [0x11C54C8] (0x853130).
+	constexpr std::uintptr_t kForm_GetFormByEditorID = 0x483A00;
 
 	constexpr std::uint8_t kFormType_TESObjectACTI = 0x15;
 	constexpr std::uint8_t kFormType_BGSTerminal = 0x17;
