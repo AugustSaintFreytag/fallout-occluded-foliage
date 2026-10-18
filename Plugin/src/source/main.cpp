@@ -32,7 +32,7 @@ namespace {
 			break;
 
 		case NVSEMessagingInterface::kMessage_PostLoadGame:
-			SOF_LOG("Game loaded.");
+			SOF_LOG("Loaded game.");
 			sof::occlusion::ResetBuilder();
 			break;
 
@@ -90,7 +90,7 @@ __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface* nvse) {
 		SOF_LOG("Error: Could not install Havok probing module.");
 	}
 
-	SOF_LOG("Plugin loaded.");
+	SOF_LOG("Loaded plugin.");
 
 	return true;
 }
