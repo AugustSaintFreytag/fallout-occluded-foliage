@@ -15,6 +15,7 @@ add_library(OccludedFoliage SHARED
 
 	source/debug/crosshair_probe.cpp
 	source/debug/grass_census.cpp
+	source/debug/physics_probe.cpp
 
 	source/engine/cells.cpp
 	source/engine/grass.cpp
