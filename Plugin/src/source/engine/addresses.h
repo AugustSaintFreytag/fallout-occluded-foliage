@@ -145,6 +145,12 @@ namespace sof::engine {
 	constexpr std::uintptr_t kGrassAddInstanceCall = 0xB62FC1;
 
 	// Havok
+	// void __thiscall bhkWorld::Update(). Steps the Havok world under `hkpWorld::lock` (0xC91B10, 0xC91BD0). (JIP; EXE: ret)
+	// Both vtables point to 0xC6AE70. (EXE)
+	constexpr std::uintptr_t kVtbl_bhkWorld = 0x10C40B4;  // (JIP)
+	constexpr std::uintptr_t kVtbl_bhkWorldM = 0x10C69F4;  // (JIP)
+	constexpr std::uintptr_t kWorldVtbl_Update = 0xC4;
+
 	constexpr float kHavokScale = 0.1428571f;  // Game units -> Havok units (1/7) (JIP kUnitConv)
 	constexpr std::uintptr_t kCdBody_Parent = 0x0C;  // hkCdBody*, null for the root collidable (JIP)
 	constexpr std::uintptr_t kRootCdBody_Layer = 0x1C;  // Root hkCdBody is hkpWorldObject +0x10. Layer at hkpWorldObject +0x2C. (JIP)
