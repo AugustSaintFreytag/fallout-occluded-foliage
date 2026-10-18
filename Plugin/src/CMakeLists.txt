@@ -32,6 +32,7 @@ add_library(OccludedFoliage SHARED
 
 	source/probe/probe.cpp
 
+	source/utils/formatting.cpp
 	source/utils/log.cpp
 	source/utils/memory.cpp
 	source/utils/threads.cpp
