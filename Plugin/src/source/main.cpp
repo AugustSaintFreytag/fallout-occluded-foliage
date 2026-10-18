@@ -6,6 +6,7 @@
 #include "debug/physics_probe.h"
 #include "input/hotkeys.h"
 #include "occlusion/builder.h"
+#include "occlusion/hider.h"
 #include "utils/log.h"
 #include "utils/threads.h"
 
@@ -29,17 +30,21 @@ namespace {
 				sof::occlusion::UpdateBuilder();
 			}
 
+			sof::occlusion::UpdateHider();
+
 			break;
 
 		case NVSEMessagingInterface::kMessage_PostLoadGame:
 			SOF_LOG("Loaded game.");
 			sof::occlusion::ResetBuilder();
+			sof::occlusion::ResetHider();
 			break;
 
 		case NVSEMessagingInterface::kMessage_ExitToMainMenu:
 			// Probably never happens in a typical modern NV game.
 			SOF_LOG("Exited to main menu.");
 			sof::occlusion::ResetBuilder();
+			sof::occlusion::ResetHider();
 			break;
 
 		// Stops the async worker before the game shuts Havok down.
@@ -91,6 +96,10 @@ __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface* nvse) {
 	}
 
 	sof::occlusion::InitializeBuilder();
+
+	if (!sof::occlusion::InstallHider()) {
+		SOF_LOG("Error: Could not patch the grass AddInstance call. Only grass already placed gets hidden.");
+	}
 
 	if (!sof::debug::InstallPhysicsProbe()) {
 		SOF_LOG("Error: Could not install Havok probing module.");
