@@ -31,6 +31,12 @@ namespace sof::probe {
 		// Number of allowed hits per ray before probe assumes occlusion.
 		constexpr int kMaxHitsPerRay = 8;
 
+		// Base form IDs of statics that never occlude.
+		// Read by the async worker. Replaced only while the worker is paused.
+		//
+		// Thread: Main, Worker
+		std::unordered_set<std::uint32_t> g_blacklist;
+
 		// Classifies and returns the hit kind for the given individual raycast result.
 		HitKind ClassifyHit(const engine::RaycastResult& hit) {
 			if (IsOccluder(hit.reference)) {
@@ -112,6 +118,7 @@ namespace sof::probe {
 	//
 	// Engine built-in statics do not have associated meshes (e.g. markers).
 	// Built-in `CollisionMarker` has no 3D mesh but still has collision (not relevant for us).
+	// Statics in `[OccluderBlacklist]` of `OccludedFoliageForms.ini` never occlude.
 	bool IsOccluder(void* reference) {
 		if (!reference) {
 			return false;
@@ -124,7 +131,17 @@ namespace sof::probe {
 			return false;
 		}
 
-		return engine::GetFormID(baseForm) >= engine::kPluginHeadFormID;
+		const std::uint32_t baseFormID = engine::GetFormID(baseForm);
+
+		return baseFormID >= engine::kPluginHeadFormID && !g_blacklist.contains(baseFormID);
+	}
+
+	// Replaces the base form IDs of statics that never occlude.
+	// The async worker must be paused, as it reads the set during probes.
+	//
+	// Thread: Main
+	void SetOccluderBlacklist(std::unordered_set<std::uint32_t> baseFormIDs) {
+		g_blacklist = std::move(baseFormIDs);
 	}
 
 	// Probes the grid point at a given world position for an occluder within the probe height above the terrain.

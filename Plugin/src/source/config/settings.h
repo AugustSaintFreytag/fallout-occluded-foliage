@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace sof::config {
 
@@ -79,6 +80,9 @@ namespace sof::config {
 	void Load(const std::string& iniPath);
 
 	void Reload();
+
+
+	std::vector<std::string> ReadOccluderBlacklist();
 
 	const Settings& Get();
 

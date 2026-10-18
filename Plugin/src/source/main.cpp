@@ -5,6 +5,7 @@
 #include "config/settings.h"
 #include "debug/physics_probe.h"
 #include "input/hotkeys.h"
+#include "occlusion/blacklist.h"
 #include "occlusion/builder.h"
 #include "occlusion/hider.h"
 #include "utils/log.h"
@@ -32,6 +33,11 @@ namespace {
 
 			sof::occlusion::UpdateHider();
 
+			break;
+
+		// Editor IDs resolve once the game data is loaded
+		case NVSEMessagingInterface::kMessage_DeferredInit:
+			sof::occlusion::LoadOccluderBlacklist();
 			break;
 
 		case NVSEMessagingInterface::kMessage_PostLoadGame:
