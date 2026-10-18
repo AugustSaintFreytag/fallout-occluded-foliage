@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <unordered_set>
 
 namespace sof::probe {
 
@@ -44,6 +45,8 @@ namespace sof::probe {
 	const char* DescriptionForVerdict(Verdict verdict);
 
 	bool IsOccluder(void* reference);
+
+	void SetOccluderBlacklist(std::unordered_set<std::uint32_t> baseFormIDs);
 
 	ProbeResult ProbePoint(void* cell, float x, float y, float terrainHeight, float probeHeight, const TraceCallback& trace = {});
 

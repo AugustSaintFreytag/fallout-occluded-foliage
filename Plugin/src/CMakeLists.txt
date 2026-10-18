@@ -27,7 +27,9 @@ add_library(OccludedFoliage SHARED
 
 	source/input/hotkeys.cpp
 
+	source/occlusion/blacklist.cpp
 	source/occlusion/builder.cpp
+	source/occlusion/hider.cpp
 	source/occlusion/map.cpp
 	source/occlusion/worker.cpp
 
@@ -55,6 +57,7 @@ if(SOF_DEPLOY_DIR)
 			"-DDLL=$<TARGET_FILE:OccludedFoliage>"
 			"-DPDB=$<TARGET_PDB_FILE:OccludedFoliage>"
 			"-DINI=${CMAKE_CURRENT_SOURCE_DIR}/data/OccludedFoliage.ini"
+			"-DFORMS=${CMAKE_CURRENT_SOURCE_DIR}/data/OccludedFoliageForms.ini"
 			-P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/deploy.cmake"
 		COMMENT "Deploying to ${SOF_DEPLOY_DIR}")
 endif()

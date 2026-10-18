@@ -6,10 +6,13 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 
 namespace sof::config {
 
 	namespace {
+
+		constexpr const char* kFormsFileName = "OccludedFoliageForms.ini";
 
 		// Thread: Main
 		Settings g_settings;
@@ -56,6 +59,7 @@ namespace sof::config {
 			GeneralSettings& general = settings.general;
 
 			general.enabled = ReadBool(iniPath, "General", "bEnabled", general.enabled);
+			general.toggleKey = ReadInt(iniPath, "General", "iToggleKey", general.toggleKey);
 		}
 
 		void LoadProbe(const char* iniPath, Settings& settings) {
@@ -122,6 +126,47 @@ namespace sof::config {
 	void Reload() {
 		g_settings = ReadSettings();
 		SOF_LOG("Reloaded config from path '%s'.", g_iniPath.c_str());
+	}
+
+	// Flips `[General] bEnabled` in the current settings. The next reload sets it from the INI again.
+	// Returns the new state.
+	//
+	// Thread: Main
+	bool ToggleEnabled() {
+		g_settings.general.enabled = !g_settings.general.enabled;
+		SOF_LOG("Toggled %s.", g_settings.general.enabled ? "on" : "off");
+
+		return g_settings.general.enabled;
+	}
+
+	// Reads the editor IDs in section `[OccluderBlacklist]` of `OccludedFoliageForms.ini`, next to the main INI.
+	// One editor ID per line. Text after `;`, `#` or `=` is ignored.
+	//
+	// Thread: Main
+	std::vector<std::string> ReadOccluderBlacklist() {
+		const std::size_t directoryEnd = g_iniPath.find_last_of("\\/");
+		const std::string formsPath =
+			(directoryEnd == std::string::npos ? std::string() : g_iniPath.substr(0, directoryEnd + 1)) + kFormsFileName;
+
+		std::vector<char> buffer(32767);
+		const DWORD length = GetPrivateProfileSectionA("OccluderBlacklist", buffer.data(), static_cast<DWORD>(buffer.size()),
+			formsPath.c_str());
+
+		std::vector<std::string> editorIDs;
+
+		for (const char* line = buffer.data(); line < buffer.data() + length && *line; line += std::strlen(line) + 1) {
+			std::string entry(line);
+			entry = entry.substr(0, entry.find_first_of(";#="));
+
+			const std::size_t first = entry.find_first_not_of(" \t");
+			const std::size_t last = entry.find_last_not_of(" \t");
+
+			if (first != std::string::npos) {
+				editorIDs.push_back(entry.substr(first, last - first + 1));
+			}
+		}
+
+		return editorIDs;
 	}
 
 	// Returns the current settings. A reload changes them in place.

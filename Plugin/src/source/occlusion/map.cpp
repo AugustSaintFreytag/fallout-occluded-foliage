@@ -16,6 +16,8 @@ namespace sof::occlusion {
 		// Thread: Main
 		void* g_worldSpace = nullptr;
 		std::unordered_map<std::uint64_t, std::unique_ptr<CellMap>> g_maps;
+		std::uint32_t g_occlusionVersion = 0;  // Occluded grid points across all maps
+		std::uint32_t g_nextSerial = 1;
 
 		std::uint64_t CellKey(std::int32_t cellX, std::int32_t cellY) {
 			return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(cellX)) << 32) | static_cast<std::uint32_t>(cellY);
@@ -69,6 +71,7 @@ namespace sof::occlusion {
 			map = std::make_unique<CellMap>();
 			map->cellX = cellX;
 			map->cellY = cellY;
+			map->serial = g_nextSerial++;
 		}
 
 		return *map;
@@ -90,6 +93,18 @@ namespace sof::occlusion {
 		map.resolved.set(index);
 		map.occluded.set(index, isOccluded);
 		++map.resolvedCount;
+
+		if (isOccluded) {
+			++map.occludedVersion;
+			++g_occlusionVersion;
+		}
+	}
+
+	// Returns a counter that changes whenever any map gains an occluded grid point.
+	//
+	// Thread: Main
+	std::uint32_t GetOcclusionVersion() {
+		return g_occlusionVersion;
 	}
 
 	// Samples the land height at every land mesh vertex of a given map's cell. Sets `hasLand` if all samples succeed.

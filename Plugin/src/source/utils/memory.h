@@ -23,4 +23,6 @@ namespace sof::mem {
 
 	void* PatchPointer(std::uintptr_t slot, void* replacement);
 
+	bool PatchCall(std::uintptr_t address, std::uintptr_t expectedTarget, void* replacement);
+
 }

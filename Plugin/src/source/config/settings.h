@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace sof::config {
 
@@ -9,6 +10,10 @@ namespace sof::config {
 
 	struct GeneralSettings {
 		bool enabled = true;
+
+		// Keybind that toggles `enabled` until the next reload
+		// Virtual-key code (VK_END), 0 = no key
+		int toggleKey = 0x23;
 	};
 
 	struct ProbeSettings {
@@ -76,6 +81,10 @@ namespace sof::config {
 	void Load(const std::string& iniPath);
 
 	void Reload();
+
+	bool ToggleEnabled();
+
+	std::vector<std::string> ReadOccluderBlacklist();
 
 	const Settings& Get();
 

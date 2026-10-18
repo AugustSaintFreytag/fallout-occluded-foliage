@@ -55,6 +55,12 @@ namespace sof::occlusion {
 		double probeMicroseconds = 0.0;
 		std::int64_t readyTime = 0;  // Counter ticks
 
+		// Counts the grid points resolved as occluded. The grass hider compares it to see which cells changed.
+		std::uint32_t occludedVersion = 0;
+
+		// Unique per map created in the session. Tells a map apart from an earlier one of the same cell.
+		std::uint32_t serial = 0;
+
 		// Cell is loaded and its occluders have been rasterized into the coverage. 
 		// Gets cleared when the cell unloads.
 		bool ready = false;
@@ -75,6 +81,7 @@ namespace sof::occlusion {
 	CellMap* FindCellMap(std::int32_t cellX, std::int32_t cellY);
 
 	void Resolve(CellMap& map, std::int32_t index, bool isOccluded);
+	std::uint32_t GetOcclusionVersion();
 
 	void SampleLand(CellMap& map);
 	bool LandHeightAt(const CellMap& map, float x, float y, float& height);

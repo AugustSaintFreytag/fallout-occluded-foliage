@@ -4,6 +4,7 @@
 #include "debug/crosshair_probe.h"
 #include "debug/grass_census.h"
 #include "engine/ui.h"
+#include "occlusion/blacklist.h"
 
 #include <Windows.h>
 
@@ -12,6 +13,7 @@ namespace sof::input {
 	namespace {
 
 		// Thread: Main
+		bool g_toggleKeyWasDown = false;
 		bool g_reloadKeyWasDown = false;
 		bool g_probeKeyWasDown = false;
 		bool g_grassCensusKeyWasDown = false;
@@ -34,7 +36,19 @@ namespace sof::input {
 			return keyWentDown;
 		}
 
-		// Reloads the INI on `[Debug] iReloadKey` and shows a notification.
+		// Toggles `[General] bEnabled` on `[General] iToggleKey` and shows a notification.
+		void PollToggleKey() {
+			const int toggleKey = config::Get().general.toggleKey;
+
+			if (!toggleKey || !WasPressed(toggleKey, g_toggleKeyWasDown)) {
+				return;
+			}
+
+			const bool enabled = config::ToggleEnabled();
+			engine::ShowNotification(enabled ? "Occluded Foliage: On" : "Occluded Foliage: Off");
+		}
+
+		// Reloads the INI and the occluder blacklist on `[Debug] iReloadKey` and shows a notification.
 		void PollReloadKey() {
 			const int reloadKey = config::Get().debug.reloadKey;
 
@@ -47,6 +61,7 @@ namespace sof::input {
 			}
 
 			config::Reload();
+			occlusion::LoadOccluderBlacklist();
 			engine::ShowNotification("Occluded Foliage Settings: Reloaded");
 		}
 
@@ -95,6 +110,7 @@ namespace sof::input {
 	//
 	// Thread: Main (each frame)
 	void PollHotkeys() {
+		PollToggleKey();
 		PollReloadKey();
 		PollProbeKey();
 		PollGrassCensusKey();
