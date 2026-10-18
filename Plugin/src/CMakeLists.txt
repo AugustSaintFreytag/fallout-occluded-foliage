@@ -29,6 +29,7 @@ add_library(OccludedFoliage SHARED
 
 	source/occlusion/builder.cpp
 	source/occlusion/map.cpp
+	source/occlusion/worker.cpp
 
 	source/probe/probe.cpp
 
