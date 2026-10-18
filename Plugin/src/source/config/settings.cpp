@@ -79,15 +79,19 @@ namespace sof::config {
 			debug.grassCensusKey = ReadInt(iniPath, "Debug", "iGrassCensusKey", debug.grassCensusKey);
 			debug.grassHideTestKey = ReadInt(iniPath, "Debug", "iGrassHideTestKey", debug.grassHideTestKey);
 			debug.logMap = ReadBool(iniPath, "Debug", "bLogMap", debug.logMap);
+			debug.probePhysics = ReadBool(iniPath, "Debug", "bProbePhysics", debug.probePhysics);
+
+			const float physicsProbeDelay = ReadFloat(iniPath, "Debug", "fPhysicsProbeDelay", debug.physicsProbeDelay);
+			debug.physicsProbeDelay = std::clamp(physicsProbeDelay, 0.0f, 10.0f);
 		}
 
 		void LogSettings(const Settings& settings) {
 			SOF_LOG("Config general: Enabled=%d", settings.general.enabled);
 			SOF_LOG("Config probe: ProbeHeight=%.0f Budget=%.2fms Radius=%.0f", settings.probe.probeHeight, settings.probe.budget,
 				settings.probe.radius);
-			SOF_LOG("Config debug: ReloadKey=0x%X ProbeKey=0x%X GrassCensusKey=0x%X GrassHideTestKey=0x%X LogMap=%d",
+			SOF_LOG("Config debug: ReloadKey=0x%X ProbeKey=0x%X GrassCensusKey=0x%X GrassHideTestKey=0x%X LogMap=%d ProbePhysics=%d PhysicsProbeDelay=%.2fms",
 				settings.debug.reloadKey, settings.debug.probeKey, settings.debug.grassCensusKey, settings.debug.grassHideTestKey,
-				settings.debug.logMap);
+				settings.debug.logMap, settings.debug.probePhysics, settings.debug.physicsProbeDelay);
 		}
 
 		// Reads the INI from `Load` into fresh settings. A missing key keeps its default.

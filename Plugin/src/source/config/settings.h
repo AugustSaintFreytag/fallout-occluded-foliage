@@ -35,6 +35,13 @@ namespace sof::config {
 
 		// Logs cells as they become ready and complete, and a status line every 10 seconds
 		bool logMap = false;
+
+		// Hooks `bhkWorld::Update` and logs which threads step the Havok world, for how long,
+		// and whether a step is still running when the main loop starts. Applies at load only
+		bool probePhysics = false;
+
+		// Busy wait on the physics thread after each step, in every other 10-second interval of the physics probe
+		float physicsProbeDelay = 0.0f;  // Milliseconds, 0 = off
 	};
 
 	struct Settings {
