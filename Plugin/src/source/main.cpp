@@ -84,6 +84,12 @@ __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface* nvse) {
 		return false;
 	}
 
+	sof::occlusion::InitializeBuilder();
+
+	if (!sof::debug::InstallPhysicsProbe()) {
+		SOF_LOG("Error: Could not install Havok probing module.");
+	}
+
 	SOF_LOG("Plugin loaded.");
 
 	return true;

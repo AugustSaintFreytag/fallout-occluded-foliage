@@ -39,6 +39,7 @@ namespace sof::debug {
 			double totalMicroseconds = 0.0;
 			double maxMicroseconds = 0.0;
 			double totalStartAfterMainLoop = 0.0;  // Microseconds
+			double totalDelayMicroseconds = 0.0;  // Busy wait after the steps, as measured
 		};
 
 		UpdateFn g_originalWorldUpdate = nullptr;
@@ -63,7 +64,7 @@ namespace sof::debug {
 		std::int64_t g_lastStatus = 0;
 		bool g_delayInterval = false;
 
-		void RecordStep(std::uint32_t threadId, double microseconds, double startAfterMainLoop) {
+		void RecordStep(std::uint32_t threadId, double microseconds, double startAfterMainLoop, double delayMicroseconds) {
 			std::lock_guard guard(g_lock);
 
 			ThreadStatistics* statistics = nullptr;
@@ -90,6 +91,7 @@ namespace sof::debug {
 			statistics->totalMicroseconds += microseconds;
 			statistics->maxMicroseconds = std::max(statistics->maxMicroseconds, microseconds);
 			statistics->totalStartAfterMainLoop += startAfterMainLoop;
+			statistics->totalDelayMicroseconds += delayMicroseconds;
 		}
 
 		// Times one world step and records its thread. Busy-waits after the step in delay intervals.
@@ -114,19 +116,14 @@ namespace sof::debug {
 				}
 			}
 
+			const double delayMicroseconds = timing::TicksToMicroseconds(static_cast<double>(timing::Now() - end));
+
 			g_steppingThread.store(0, std::memory_order_relaxed);
 
 			const double microseconds = timing::TicksToMicroseconds(static_cast<double>(end - start));
 			const double startAfterMainLoop = lastMainLoop ? timing::TicksToMicroseconds(static_cast<double>(start - lastMainLoop)) : 0.0;
 
-			RecordStep(threadId, microseconds, startAfterMainLoop);
-		}
-
-		// Returns the number of counter ticks in a given number of milliseconds.
-		std::int64_t MillisecondsToTicks(double milliseconds) {
-			const double ticksPerMillisecond = 1000.0 / timing::TicksToMicroseconds(1000.0);
-
-			return static_cast<std::int64_t>(milliseconds * ticksPerMillisecond);
+			RecordStep(threadId, microseconds, startAfterMainLoop, delayMicroseconds);
 		}
 
 		void LogStatus(double delayMilliseconds) {
@@ -144,10 +141,10 @@ namespace sof::debug {
 				const double steps = std::max<std::uint32_t>(statistics.steps, 1);
 
 				SOF_LOG("[Physics]   Thread %u (%s): %u steps, %.3f ms average, %.3f ms max, start %.2f ms after the main loop "
-						"message on average.",
+						"message on average. Measured delay %.3f ms per step.",
 					statistics.threadId, statistics.threadId == threads::MainThreadId() ? "main" : "other", statistics.steps,
 					statistics.totalMicroseconds / steps / 1000.0, statistics.maxMicroseconds / 1000.0,
-					statistics.totalStartAfterMainLoop / steps / 1000.0);
+					statistics.totalStartAfterMainLoop / steps / 1000.0, statistics.totalDelayMicroseconds / steps / 1000.0);
 			}
 
 			if (g_droppedSteps > 0) {
@@ -226,7 +223,7 @@ namespace sof::debug {
 		LogStatus(delayMilliseconds);
 
 		g_delayInterval = delayMilliseconds > 0.0 && !g_delayInterval;
-		g_delayTicks.store(g_delayInterval ? MillisecondsToTicks(delayMilliseconds) : 0, std::memory_order_relaxed);
+		g_delayTicks.store(g_delayInterval ? timing::MillisecondsToTicks(delayMilliseconds) : 0, std::memory_order_relaxed);
 		g_lastStatus = now;
 	}
 

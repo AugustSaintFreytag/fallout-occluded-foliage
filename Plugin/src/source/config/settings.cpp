@@ -82,7 +82,7 @@ namespace sof::config {
 			debug.probePhysics = ReadBool(iniPath, "Debug", "bProbePhysics", debug.probePhysics);
 
 			const float physicsProbeDelay = ReadFloat(iniPath, "Debug", "fPhysicsProbeDelay", debug.physicsProbeDelay);
-			debug.physicsProbeDelay = std::clamp(physicsProbeDelay, 0.0f, 10.0f);
+			debug.physicsProbeDelay = std::clamp(physicsProbeDelay, 0.0f, 50.0f);
 		}
 
 		void LogSettings(const Settings& settings) {

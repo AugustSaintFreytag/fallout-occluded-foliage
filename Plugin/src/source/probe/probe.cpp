@@ -118,7 +118,7 @@ namespace sof::probe {
 			return false;
 		}
 
-		return engine::GetFormID(baseForm) >= engine::kFirstPluginFormID;
+		return engine::GetFormID(baseForm) >= engine::kPluginHeadFormID;
 	}
 
 	// Probes the grid point at the given world position for an occluder within the given height above the terrain.

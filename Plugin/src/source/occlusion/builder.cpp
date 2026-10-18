@@ -538,6 +538,19 @@ namespace sof::occlusion {
 		}
 	}
 
+	// Builds the ring offsets for the configured radius. The sort takes several milliseconds,
+	// so it runs at load instead of on the first frame. A changed radius rebuilds them on the next frame.
+	//
+	// Thread: Main (load time only)
+	void InitializeBuilder() {
+		const std::int64_t startTime = timing::Now();
+
+		BuildOffsets(config::Get().probe.radius);
+
+		SOF_LOG("Map: %zu ring offsets for radius %.0f in %.1f ms.", g_offsets.size(), g_offsetRadius,
+			timing::TicksToMilliseconds(static_cast<double>(timing::Now() - startTime)));
+	}
+
 	// Clears all occlusion maps and the scan state. Called on game load and on exit to the main menu.
 	//
 	// Thread: Main
