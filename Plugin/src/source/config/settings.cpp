@@ -64,8 +64,16 @@ namespace sof::config {
 			const float probeHeight = ReadFloat(iniPath, "Probe", "fProbeHeight", probe.probeHeight);
 			probe.probeHeight = std::clamp(probeHeight, 32.0f, 4096.0f);
 
-			const float budget = ReadFloat(iniPath, "Probe", "fBudget", probe.budget);
-			probe.budget = std::clamp(budget, 0.0f, 5.0f);
+			const float syncBudget = ReadFloat(iniPath, "Probe", "fSyncBudget", probe.syncBudget);
+			probe.syncBudget = std::clamp(syncBudget, 0.0f, 5.0f);
+
+			probe.async = ReadBool(iniPath, "Probe", "bAsync", probe.async);
+
+			const float asyncBudget = ReadFloat(iniPath, "Probe", "fAsyncBudget", probe.asyncBudget);
+			probe.asyncBudget = std::clamp(asyncBudget, 0.0f, 12.0f);
+
+			const int batchSize = ReadInt(iniPath, "Probe", "iBatchSize", static_cast<int>(probe.batchSize));
+			probe.batchSize = static_cast<std::uint32_t>(std::clamp(batchSize, 1, 512));
 
 			const float radius = ReadFloat(iniPath, "Probe", "fRadius", probe.radius);
 			probe.radius = std::clamp(radius, 512.0f, 16384.0f);
