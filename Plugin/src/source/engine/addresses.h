@@ -164,20 +164,30 @@ namespace sof::engine {
 	constexpr std::uintptr_t kHavok_LeaveGlobalLock = 0xC904E0;
 	constexpr std::uintptr_t kHavokGlobalLock = 0x12681D4;  // Lock object*, null before Havok init
 
-	// Havok per-thread state. Every thread that calls into Havok needs a memory router and a monitor stream in TLS.
+	// Havok per-thread state. Every thread that calls into Havok needs a memory router, a stack area and a monitor stream.
 	// `bhkWorld::PickObject` (0xC696D0) reads the monitor stream from TLS slot [0x126835C] without a null check.
-	// Setup as in the thread main of `hkCpuJobThreadPool` (0xD2CFB0). (EXE)
+	// Ray casts bump the router's stack cursor inline without a bounds check (0xD1651F).
+	// Setup as in Bethesda's thread setup at 0x8C6FF0, teardown at 0x8C7110. (EXE)
 	// void __thiscall hkMemoryRouter::hkMemoryRouter(). Zeroes 0x20 bytes. `threadInit` also writes +0x20. (EXE: ret)
 	constexpr std::uintptr_t kHavok_MemoryRouterConstructor = 0xC85770;
 	// hkMemorySystem* __cdecl hkMemorySystem::getInstance(). Reads [0x1268418]. (EXE)
 	constexpr std::uintptr_t kHavok_GetMemorySystem = 0xCBBFC0;
-	// void __thiscall hkMemorySystem::threadInit(hkMemoryRouter&, const char* name, int flags). Flags 3 = all.
-	// Claims one of 32 thread slots and allocates the thread's stack area. (EXE: 0xCD0830, ret 0xC)
+	// void __thiscall hkMemorySystem::threadInit(hkMemoryRouter&, const char* name, int flags). (EXE: 0xCD0830, ret 0xC)
+	// Flag 1 claims one of 32 thread slots and sets the heap allocator. Flag 2 would allocate the stack area,
+	// but the game's memory system has a stack size of 0. Bethesda threads pass 1 and set up their own stack.
 	constexpr std::uintptr_t kMemorySystemVtbl_ThreadInit = 0x0C;
+	constexpr int kHavokThreadInitHeap = 1;
 	// void __cdecl hkBaseSystem::initThread(hkMemoryRouter*). Sets router TLS [0x1268108], then `hkMonitorStream::init`
 	// (0xCB0DB0) sets an empty monitor stream in TLS [0x126835C]. (EXE)
 	constexpr std::uintptr_t kHavok_InitThread = 0xCBB930;
 	constexpr std::uintptr_t kHavokMemoryRouterSize = 0x24;
+	constexpr std::uintptr_t kMemoryRouter_StackCursor = 0x00;  // Next free byte of the stack area (EXE)
+	constexpr std::uintptr_t kMemoryRouter_StackBase = 0x04;  // (EXE)
+	constexpr std::uintptr_t kMemoryRouter_StackEnd = 0x08;  // (EXE)
+	constexpr std::uintptr_t kMemoryRouter_Temp = 0x0C;  // Allocator*, Bethesda threads set the heap (EXE)
+	constexpr std::uintptr_t kMemoryRouter_Heap = 0x10;  // Allocator*, set by `threadInit` (EXE)
+	constexpr std::uintptr_t kMemoryRouter_Solver = 0x18;  // Allocator*, Bethesda threads set the heap (EXE)
+	constexpr std::uintptr_t kHavokThreadStackSize = 0x32000;  // Bethesda threads, 200 KB (EXE)
 
 	constexpr float kHavokScale = 0.1428571f;  // Game units -> Havok units (1/7) (JIP kUnitConv)
 	constexpr std::uintptr_t kCdBody_Parent = 0x0C;  // hkCdBody*, null for the root collidable (JIP)
