@@ -64,8 +64,16 @@ namespace sof::config {
 			const float probeHeight = ReadFloat(iniPath, "Probe", "fProbeHeight", probe.probeHeight);
 			probe.probeHeight = std::clamp(probeHeight, 32.0f, 4096.0f);
 
-			const float budget = ReadFloat(iniPath, "Probe", "fBudget", probe.budget);
-			probe.budget = std::clamp(budget, 0.0f, 5.0f);
+			const float syncBudget = ReadFloat(iniPath, "Probe", "fSyncBudget", probe.syncBudget);
+			probe.syncBudget = std::clamp(syncBudget, 0.0f, 5.0f);
+
+			probe.async = ReadBool(iniPath, "Probe", "bAsync", probe.async);
+
+			const float asyncBudget = ReadFloat(iniPath, "Probe", "fAsyncBudget", probe.asyncBudget);
+			probe.asyncBudget = std::clamp(asyncBudget, 0.0f, 12.0f);
+
+			const int batchSize = ReadInt(iniPath, "Probe", "iBatchSize", static_cast<int>(probe.batchSize));
+			probe.batchSize = static_cast<std::uint32_t>(std::clamp(batchSize, 1, 512));
 
 			const float radius = ReadFloat(iniPath, "Probe", "fRadius", probe.radius);
 			probe.radius = std::clamp(radius, 512.0f, 16384.0f);
@@ -79,15 +87,10 @@ namespace sof::config {
 			debug.grassCensusKey = ReadInt(iniPath, "Debug", "iGrassCensusKey", debug.grassCensusKey);
 			debug.grassHideTestKey = ReadInt(iniPath, "Debug", "iGrassHideTestKey", debug.grassHideTestKey);
 			debug.logMap = ReadBool(iniPath, "Debug", "bLogMap", debug.logMap);
-		}
+			debug.probePhysics = ReadBool(iniPath, "Debug", "bProbePhysics", debug.probePhysics);
 
-		void LogSettings(const Settings& settings) {
-			SOF_LOG("Config general: Enabled=%d", settings.general.enabled);
-			SOF_LOG("Config probe: ProbeHeight=%.0f Budget=%.2fms Radius=%.0f", settings.probe.probeHeight, settings.probe.budget,
-				settings.probe.radius);
-			SOF_LOG("Config debug: ReloadKey=0x%X ProbeKey=0x%X GrassCensusKey=0x%X GrassHideTestKey=0x%X LogMap=%d",
-				settings.debug.reloadKey, settings.debug.probeKey, settings.debug.grassCensusKey, settings.debug.grassHideTestKey,
-				settings.debug.logMap);
+			const float physicsProbeDelay = ReadFloat(iniPath, "Debug", "fPhysicsProbeDelay", debug.physicsProbeDelay);
+			debug.physicsProbeDelay = std::clamp(physicsProbeDelay, 0.0f, 50.0f);
 		}
 
 		// Reads the INI from `Load` into fresh settings. A missing key keeps its default.
@@ -110,9 +113,7 @@ namespace sof::config {
 	void Load(const std::string& iniPath) {
 		g_iniPath = iniPath;
 		g_settings = ReadSettings();
-
-		SOF_LOG("Config loaded from '%s'.", g_iniPath.c_str());
-		LogSettings(g_settings);
+		SOF_LOG("Loaded config from path '%s'.", g_iniPath.c_str());
 	}
 
 	// Reads the INI from `Load` again, makes its settings current and logs them.
@@ -120,9 +121,7 @@ namespace sof::config {
 	// Thread: Main
 	void Reload() {
 		g_settings = ReadSettings();
-
-		SOF_LOG("Config reloaded from '%s'.", g_iniPath.c_str());
-		LogSettings(g_settings);
+		SOF_LOG("Reloaded config from path '%s'.", g_iniPath.c_str());
 	}
 
 	// Returns the current settings. A reload changes them in place.

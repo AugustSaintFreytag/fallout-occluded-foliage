@@ -2,6 +2,8 @@
 
 #include "occlusion/map.h"
 
+#include "engine/terrain.h"
+
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -88,6 +90,61 @@ namespace sof::occlusion {
 		map.resolved.set(index);
 		map.occluded.set(index, isOccluded);
 		++map.resolvedCount;
+	}
+
+	// Samples the land height at every land mesh vertex of a given map's cell. Sets `hasLand` if all samples succeed.
+	// Vertices on the far edges are sampled half a unit inside. This keeps the lookup in the cell.
+	//
+	// Thread: Main
+	void SampleLand(CellMap& map) {
+		const float originX = static_cast<float>(map.cellX) * kCellSize;
+		const float originY = static_cast<float>(map.cellY) * kCellSize;
+		const float lastOffset = kCellSize - 0.5f;
+
+		map.hasLand = true;
+
+		for (std::int32_t vertexY = 0; vertexY < kLandVerticesPerSide; ++vertexY) {
+			for (std::int32_t vertexX = 0; vertexX < kLandVerticesPerSide; ++vertexX) {
+				const float x = originX + std::min(static_cast<float>(vertexX) * kLandVertexSpacing, lastOffset);
+				const float y = originY + std::min(static_cast<float>(vertexY) * kLandVertexSpacing, lastOffset);
+				float& height = map.landHeights[vertexY * kLandVerticesPerSide + vertexX];
+
+				if (!engine::GetLandHeight({x, y, 0.0f}, height)) {
+					map.hasLand = false;
+
+					return;
+				}
+			}
+		}
+	}
+
+	// Interpolates the land height at a given world position from the samples of a given map.
+	// Bilinear between the four nearest vertices. The land mesh splits each square into two triangles.
+	// The result can differ from the land by a few units on uneven ground.
+	// Returns false if the map has no land samples.
+	//
+	// Thread: Any. The samples do not change once the map is ready.
+	bool LandHeightAt(const CellMap& map, float x, float y, float& height) {
+		if (!map.hasLand) {
+			return false;
+		}
+
+		const float localX = std::clamp((x - static_cast<float>(map.cellX) * kCellSize) / kLandVertexSpacing, 0.0f, 31.999f);
+		const float localY = std::clamp((y - static_cast<float>(map.cellY) * kCellSize) / kLandVertexSpacing, 0.0f, 31.999f);
+		const std::int32_t vertexX = static_cast<std::int32_t>(localX);
+		const std::int32_t vertexY = static_cast<std::int32_t>(localY);
+		const float fractionX = localX - static_cast<float>(vertexX);
+		const float fractionY = localY - static_cast<float>(vertexY);
+
+		const float* row = &map.landHeights[vertexY * kLandVerticesPerSide + vertexX];
+		const float* nextRow = row + kLandVerticesPerSide;
+
+		const float bottom = row[0] + (row[1] - row[0]) * fractionX;
+		const float top = nextRow[0] + (nextRow[1] - nextRow[0]) * fractionX;
+
+		height = bottom + (top - bottom) * fractionY;
+
+		return true;
 	}
 
 	// Marks every grid point inside a given horizontal rectangle as covered, across cells.

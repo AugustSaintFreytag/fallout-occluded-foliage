@@ -4,19 +4,21 @@
 // All offsets before the completed index are resolved. When the player moves by some distance,
 // the completed radius shrinks by that distance and the scan resumes from there.
 //
-// A cell becomes ready once it is attached and every enabled occluder in it has loaded 3D, on two checks in a row.
-// A cell that stays attached with some occluders still unloaded becomes ready after a timeout with the loaded ones.
-// Its occluder bounds are then rasterized into the coverage of every cell they overlap.
-// A grid point is probed only if its cell is ready, and every neighbour cell within the border margin is ready too.
+// A cell is considered ready once it is attached and every enabled occluder in it has loaded meshs (3D).
+// Occluder bounds get rasterized into the coverage of every cell they overlap.
+// A grid point is probed only if the containing and nearby cells are all ready.
 
 #include "occlusion/builder.h"
 
 #include "config/settings.h"
 #include "engine/addresses.h"
 #include "engine/cells.h"
+#include "engine/havok.h"
 #include "engine/objects.h"
 #include "occlusion/map.h"
+#include "occlusion/worker.h"
 #include "probe/probe.h"
+#include "utils/formatting.h"
 #include "utils/log.h"
 #include "utils/memory.h"
 #include "utils/timing.h"
@@ -75,10 +77,33 @@ namespace sof::occlusion {
 		// Counters for the status line.
 		struct Statistics {
 			std::uint32_t frames = 0;
-			std::uint32_t probes = 0;
+			std::uint32_t probes = 0;  // On the main thread
+			std::uint32_t asyncFrames = 0;  // Frames with the worker running
+			std::uint32_t droppedOutcomes = 0;
+			std::uint32_t retriedPoints = 0;
+
 			double totalMilliseconds = 0.0;
 			double maxMilliseconds = 0.0;
 		};
+
+		// A stretch of frames in which the scan had work.
+		struct ScanRun {
+			bool active = false;
+			std::int64_t startTime = 0;  // Counter ticks
+			std::size_t probes = 0;  // Main thread and worker
+		};
+
+		// Frames the loaded cell set must stay the same before the worker runs.
+		// Cells that attach likely add their collision to the Havok world without the global lock. Not verified.
+		constexpr std::uint32_t kWorkerSettleFrames = 30;
+
+		// Scan runs with fewer probes are not logged.
+		constexpr std::size_t kMinLoggedScanProbes = 1000;
+
+		// Queued tasks per probe the worker finished in the last frame. Keeps the queue filled for about two frames.
+		constexpr std::size_t kQueueFramesAhead = 2;
+		constexpr std::size_t kMinQueuedTasks = 64;
+		constexpr std::size_t kMaxQueuedTasks = 16384;
 
 		// Thread: Main
 		std::vector<Offset> g_offsets;
@@ -91,13 +116,23 @@ namespace sof::occlusion {
 		std::size_t g_cursor = 0;
 		bool g_idle = false;
 
+		bool g_workerActive = false;
+		std::uint32_t g_framesSinceCellChange = 0;
+		std::size_t g_lastWorkerProbes = 0;
+		std::vector<ProbeOutcome> g_outcomes;
+		std::vector<ProbeTask> g_tasks;
+
 		std::vector<engine::LoadedCell> g_loadedCells;
 		std::unordered_set<std::uint64_t> g_loadedKeys;
 		std::unordered_map<std::uint64_t, ReadinessCheck> g_readinessChecks;
 		std::size_t g_nextReadinessCheck = 0;
 
 		Statistics g_statistics;
+		ScanRun g_scanRun;
 		std::int64_t g_lastStatusTime = 0;
+		std::size_t g_lastCoveredResolved = 0;
+		bool g_idleLogged = false;
+		std::uint32_t g_lastPickFaults = 0;
 
 		std::uint64_t CellKey(std::int32_t cellX, std::int32_t cellY) {
 			return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(cellX)) << 32) | static_cast<std::uint32_t>(cellY);
@@ -177,7 +212,8 @@ namespace sof::occlusion {
 		}
 
 		// Records the loaded exterior cells. Marks maps of cells that left the grid as not ready.
-		void UpdateLoadedCells() {
+		// Returns true if the set of loaded cells changed.
+		bool UpdateLoadedCells() {
 			std::vector<engine::LoadedCell> cells = engine::GetLoadedExteriorCells();
 			std::unordered_set<std::uint64_t> keys;
 
@@ -188,7 +224,7 @@ namespace sof::occlusion {
 			if (keys == g_loadedKeys) {
 				g_loadedCells = std::move(cells);
 
-				return;
+				return false;
 			}
 
 			ForEachCellMap([&](CellMap& map) {
@@ -203,17 +239,21 @@ namespace sof::occlusion {
 
 			g_loadedCells = std::move(cells);
 			g_loadedKeys = std::move(keys);
+
+			return true;
 		}
 
 		// Collects the world bounds of every enabled occluder in a given cell that has loaded 3D.
 		// Adds each enabled occluder without loaded 3D to the given list.
+		// Occluders with a marker model are left out. Their 3D never loads, so a cell would wait for the timeout.
 		// Returns the number of enabled occluders without loaded 3D.
 		std::size_t CollectOccluderBounds(void* cell, std::vector<engine::ReferenceBounds>& bounds,
 			std::vector<void*>& unloadedReferences) {
 			std::size_t unloaded = 0;
 
 			for (void* reference : engine::GetCellReferences(cell)) {
-				if (!probe::IsOccluder(reference) || engine::IsDisabledOrDeleted(reference)) {
+				if (!probe::IsOccluder(reference) || engine::IsDisabledOrDeleted(reference)
+					|| engine::HasMarkerModel(engine::GetBaseForm(reference))) {
 					continue;
 				}
 
@@ -232,6 +272,27 @@ namespace sof::occlusion {
 			return unloaded;
 		}
 
+		void LogCellPrepared(const CellMap& map, std::size_t occluders, std::size_t unloaded) {
+			char details[160] = "";
+			std::size_t length = 0;
+
+			if (unloaded > 0) {
+				length += std::snprintf(details + length, sizeof(details) - length, " %zu occluder%s without 3D after %.0fs.",
+					unloaded, format::Plural(unloaded), kReadinessTimeoutSeconds);
+			}
+
+			if (!map.hasLand) {
+				length += std::snprintf(details + length, sizeof(details) - length, " No land.");
+			}
+
+			if (map.resolvedCount > 0) {
+				std::snprintf(details + length, sizeof(details) - length, " Kept %s resolved grid points.",
+					format::Count(map.resolvedCount).c_str());
+			}
+
+			// SOF_LOG("[Map] Prepared cell (%d, %d) with %zu occluder%s.%s", map.cellX, map.cellY, occluders, format::Plural(occluders), details);
+		}
+
 		// Checks one loaded cell that is not ready yet, in turn. Makes it ready on its second passed check.
 		// Returns true if a cell became ready.
 		bool CheckNextCellReadiness() {
@@ -247,7 +308,6 @@ namespace sof::occlusion {
 
 				if (!engine::IsAttached(cell.cell)) {
 					g_readinessChecks.erase(key);
-
 					return false;
 				}
 
@@ -266,39 +326,42 @@ namespace sof::occlusion {
 
 				if (unloaded > 0 && !timedOut) {
 					check.passedOnce = false;
-
 					return false;
 				}
 
 				if (unloaded == 0 && !check.passedOnce) {
 					check.passedOnce = true;
-
 					return false;
 				}
 
 				g_readinessChecks.erase(key);
 
 				for (const engine::ReferenceBounds& reference : bounds) {
-					CoverRectangle(reference.center.x - reference.radius, reference.center.y - reference.radius,
-						reference.center.x + reference.radius, reference.center.y + reference.radius);
+					CoverRectangle(
+						reference.center.x - reference.radius, 
+						reference.center.y - reference.radius,
+						reference.center.x + reference.radius, 
+						reference.center.y + reference.radius
+					);
 				}
 
 				CellMap& map = GetOrCreateCellMap(cell.x, cell.y);
+				SampleLand(map);
 				map.ready = true;
+				map.readyTime = now;
 
 				if (config::Get().debug.logMap) {
-					SOF_LOG("[Map] Cell (%d, %d) ready with %zu occluders, %zu without 3D after the timeout. %zu of %d grid points "
-							"resolved before.",
-						cell.x, cell.y, bounds.size(), unloaded, static_cast<std::size_t>(map.resolvedCount), kPointsPerCell);
+					LogCellPrepared(map, bounds.size(), unloaded);
 
 					for (std::size_t index = 0; index < unloadedReferences.size() && index < kMaxLoggedUnloaded; ++index) {
 						void* reference = unloadedReferences[index];
 						void* baseForm = engine::GetBaseForm(reference);
 
-						SOF_LOG("[Map]   Without 3D: Ref=%08X '%s' Flags=%08X Base=%s %08X '%s' Model=\"%s\"", engine::GetFormID(reference),
-							engine::GetEditorID(reference), mem::Field<std::uint32_t>(reference, engine::kForm_Flags),
-							engine::FormTypeName(engine::GetFormType(baseForm)), engine::GetFormID(baseForm),
-							engine::GetEditorID(baseForm), engine::GetModelPath(baseForm));
+						SOF_LOG("[Map]   Without 3D: '%s' (%08X, flags %08X), base %s '%s' (%08X), \"%s\".",
+							engine::GetEditorID(reference), engine::GetFormID(reference),
+							mem::Field<std::uint32_t>(reference, engine::kForm_Flags),
+							engine::FormTypeName(engine::GetFormType(baseForm)), engine::GetEditorID(baseForm),
+							engine::GetFormID(baseForm), engine::GetModelPath(baseForm));
 					}
 				}
 
@@ -319,6 +382,16 @@ namespace sof::occlusion {
 			}
 
 			return window[windowY * kWindowSide + windowX];
+		}
+
+		// Fills the window of cell maps around a given center cell. Cells without a map stay null.
+		void FillWindow(CellMap** window, std::int32_t centerCellX, std::int32_t centerCellY) {
+			for (std::int32_t windowY = 0; windowY < kWindowSide; ++windowY) {
+				for (std::int32_t windowX = 0; windowX < kWindowSide; ++windowX) {
+					window[windowY * kWindowSide + windowX] =
+						FindCellMap(centerCellX + windowX - kWindowRadius, centerCellY + windowY - kWindowRadius);
+				}
+			}
 		}
 
 		bool IsReady(const CellMap* map) {
@@ -356,24 +429,118 @@ namespace sof::occlusion {
 				return;
 			}
 
-			SOF_LOG("[Map] Cell (%d, %d) complete: %zu covered, %zu occluded grid points, %u probes, %u casts, %.2f ms probing.",
-				map.cellX, map.cellY, map.covered.count(), map.occluded.count(), map.probeCount, map.castCount,
-				map.probeMicroseconds / 1000.0);
+			const std::size_t covered = map.covered.count();
+			const std::size_t occluded = map.occluded.count();
+
+			const double seconds = timing::TicksToMicroseconds(static_cast<double>(timing::Now() - map.readyTime)) / 1.0e6;
+			const double coveredFraction = covered ? 100.0 * occluded / covered : 0.0;
+
+			SOF_LOG(
+				"[Map] Completed cell (%d, %d): %s/%s covered grid points occluded (%.0f%%) (took %s).", 
+				map.cellX, 
+				map.cellY, 
+				format::Count(occluded).c_str(), 
+				format::Count(covered).c_str(), 
+				coveredFraction, 
+				format::Duration(seconds).c_str()
+			);
+
+			SOF_LOG(
+				"[Map] Performed %s probes, %s casts, %.1fms probing, %.1fµs per probe.", 
+				format::Count(map.probeCount).c_str(),
+				format::Count(map.castCount).c_str(), 
+				map.probeMicroseconds / 1000.0,
+				map.probeMicroseconds / std::max<std::uint32_t>(map.probeCount, 1)
+			);
 		}
 
-		// Visits grid points from the cursor outward until the budget runs out. Returns the number of probes.
-		std::uint32_t Scan(double budgetMicroseconds, std::int64_t startTime) {
+		// Moves the completed index and the cursor back to a given grid point of a given cell, so the scan visits it again.
+		void Rewind(std::int32_t cellX, std::int32_t cellY, std::int32_t index) {
+			if (!g_hasCenter) {
+				return;
+			}
+
+			const std::int32_t pointX = cellX * kPointsPerSide + index % kPointsPerSide;
+			const std::int32_t pointY = cellY * kPointsPerSide + index / kPointsPerSide;
+			
+			const float distance = std::sqrt(static_cast<float>(
+				(pointX - g_center.x) * (pointX - g_center.x) + (pointY - g_center.y) * (pointY - g_center.y)
+			));
+
+			g_completed = std::min(g_completed, FirstOffsetAtDistance(distance));
+			g_cursor = g_completed;
+			g_idle = false;
+		}
+
+		// Clears the pending mark of a given task's grid point and rewinds the scan to it.
+		void ReleaseTask(std::int32_t cellX, std::int32_t cellY, std::int32_t index) {
+			if (CellMap* map = FindCellMap(cellX, cellY)) {
+				map->pending.reset(index);
+			}
+
+			Rewind(cellX, cellY, index);
+			++g_statistics.retriedPoints;
+		}
+
+		// Resolves the grid points of the given outcomes.
+		// Releases faulted outcomes and those from cells that aren't ready.
+		// Returns the number of grid points resolved.
+		std::size_t ApplyOutcomes(const std::vector<ProbeOutcome>& outcomes) {
+			std::size_t applied = 0;
+
+			for (const ProbeOutcome& outcome : outcomes) {
+				CellMap* map = FindCellMap(outcome.cellX, outcome.cellY);
+
+				if (!map || !map->ready || outcome.faulted) {
+					ReleaseTask(outcome.cellX, outcome.cellY, outcome.index);
+					continue;
+				}
+
+				map->pending.reset(outcome.index);
+				Resolve(*map, outcome.index, outcome.verdict == probe::Verdict::Occluded);
+				++applied;
+
+				++map->probeCount;
+				map->castCount += outcome.casts;
+				map->probeMicroseconds += outcome.microseconds;
+
+				if (map->resolvedCount == kPointsPerCell && !map->completeLogged) {
+					LogCellComplete(*map);
+				}
+			}
+
+			return applied;
+		}
+
+		// Pauses the worker and releases its queued tasks and every outcome not applied yet.
+		void PauseAndRelease() {
+			for (const ProbeTask& task : PauseWorker()) {
+				ReleaseTask(task.cellX, task.cellY, task.index);
+			}
+
+			g_outcomes.clear();
+			CollectOutcomes(g_outcomes);
+
+			for (const ProbeOutcome& outcome : g_outcomes) {
+				ReleaseTask(outcome.cellX, outcome.cellY, outcome.index);
+			}
+
+			g_statistics.droppedOutcomes += static_cast<std::uint32_t>(g_outcomes.size());
+			g_outcomes.clear();
+			g_workerActive = false;
+		}
+
+		// Visits grid points from the cursor outward until the budget runs out.
+		// Returns the number of probes.
+		//
+		// Probes covered grid points on the main thread.
+		// With a task limit above 0, queues them as tasks up to that limit instead and marks them pending.
+		std::uint32_t Scan(double budgetMicroseconds, std::int64_t startTime, void* castCell, std::size_t taskLimit) {
 			const std::int32_t centerCellX = CellOf(g_center.x);
 			const std::int32_t centerCellY = CellOf(g_center.y);
 
 			CellMap* window[kWindowSide * kWindowSide] = {};
-
-			for (std::int32_t windowY = 0; windowY < kWindowSide; ++windowY) {
-				for (std::int32_t windowX = 0; windowX < kWindowSide; ++windowX) {
-					window[windowY * kWindowSide + windowX] =
-						FindCellMap(centerCellX + windowX - kWindowRadius, centerCellY + windowY - kWindowRadius);
-				}
-			}
+			FillWindow(window, centerCellX, centerCellY);
 
 			const float probeHeight = config::Get().probe.probeHeight;
 			std::uint32_t probes = 0;
@@ -391,24 +558,35 @@ namespace sof::occlusion {
 				const std::int32_t cellY = CellOf(point.y);
 				CellMap* map = WindowMap(window, centerCellX, centerCellY, cellX, cellY);
 
+				// A pending grid point counts as resolved for the completed index. Its outcome follows,
+				// and a faulted or dropped outcome rewinds the scan to it.
 				bool resolved = false;
+				bool queueFull = false;
 
 				if (IsReady(map)) {
 					const std::int32_t index = IndexInCell(point);
+					float x = 0.0f;
+					float y = 0.0f;
+					float terrainHeight = 0.0f;
+					GridPointCenter(point, x, y);
 
-					if (map->resolved.test(index)) {
+					if (map->resolved.test(index) || map->pending.test(index)) {
 						resolved = true;
 					} else if (AreNeighboursReady(window, centerCellX, centerCellY, point, cellX, cellY)) {
-						if (!map->covered.test(index)) {
+						if (!map->covered.test(index) || !LandHeightAt(*map, x, y, terrainHeight)) {
 							Resolve(*map, index, false);
 							resolved = true;
+						} else if (taskLimit > 0) {
+							if (g_tasks.size() < taskLimit) {
+								map->pending.set(index);
+								g_tasks.push_back({cellX, cellY, index, x, y, terrainHeight});
+								resolved = true;
+							} else {
+								queueFull = true;
+							}
 						} else {
-							float x = 0.0f;
-							float y = 0.0f;
-							GridPointCenter(point, x, y);
-
 							const std::int64_t probeStart = timing::Now();
-							const probe::ProbeResult result = probe::ProbePoint(x, y, probeHeight);
+							const probe::ProbeResult result = probe::ProbePoint(castCell, x, y, terrainHeight, probeHeight);
 							const double probeMicroseconds = timing::TicksToMicroseconds(static_cast<double>(timing::Now() - probeStart));
 
 							++probes;
@@ -416,7 +594,7 @@ namespace sof::occlusion {
 							map->castCount += result.casts;
 							map->probeMicroseconds += probeMicroseconds;
 
-							if (result.verdict != probe::Verdict::NoTerrain) {
+							if (!result.faulted) {
 								Resolve(*map, index, result.verdict == probe::Verdict::Occluded);
 								resolved = true;
 							}
@@ -426,6 +604,10 @@ namespace sof::occlusion {
 							LogCellComplete(*map);
 						}
 					}
+				}
+
+				if (queueFull) {
+					break;
 				}
 
 				if (resolved && g_cursor == g_completed) {
@@ -446,6 +628,80 @@ namespace sof::occlusion {
 			return probes;
 		}
 
+		// Logs a scan run when it ends: from the first frame with probes to the first frame without work.
+		// Frames that wait for cells before the first probe do not count.
+		// Runs below `kMinLoggedScanProbes` probes are not logged. Player movement causes many of them.
+		void TrackScanRun(bool scanning, std::size_t probes, std::int64_t now) {
+			if (scanning && probes > 0 && !g_scanRun.active) {
+				g_scanRun = {};
+				g_scanRun.active = true;
+				g_scanRun.startTime = now;
+			}
+
+			g_scanRun.probes += probes;
+
+			if (scanning || !g_scanRun.active) {
+				return;
+			}
+
+			g_scanRun.active = false;
+
+			if (g_scanRun.probes < kMinLoggedScanProbes) {
+				return;
+			}
+
+			const double seconds = timing::TicksToMicroseconds(static_cast<double>(now - g_scanRun.startTime)) / 1.0e6;
+
+			SOF_LOG("[Map] Finished scan in %.2f s: %s probes, %s per second.", seconds, format::Count(g_scanRun.probes).c_str(),
+				format::Count(static_cast<std::uint64_t>(g_scanRun.probes / std::max(seconds, 0.001))).c_str());
+		}
+
+		// Covered grid points within the probe radius that the scan can reach.
+		struct ScanProgress {
+			std::size_t reachable = 0;
+			std::size_t resolved = 0;
+		};
+
+		// Counts the covered grid points within the probe radius whose cell and neighbour cells are ready.
+		// Visits every ring offset. Runs only for the progress block.
+		ScanProgress CountScanProgress() {
+			ScanProgress progress;
+
+			if (!g_hasCenter) {
+				return progress;
+			}
+
+			const std::int32_t centerCellX = CellOf(g_center.x);
+			const std::int32_t centerCellY = CellOf(g_center.y);
+
+			CellMap* window[kWindowSide * kWindowSide] = {};
+			FillWindow(window, centerCellX, centerCellY);
+
+			for (const Offset& offset : g_offsets) {
+				const GridPoint point{g_center.x + offset.x, g_center.y + offset.y};
+				const std::int32_t cellX = CellOf(point.x);
+				const std::int32_t cellY = CellOf(point.y);
+				const CellMap* map = WindowMap(window, centerCellX, centerCellY, cellX, cellY);
+
+				if (!IsReady(map)) {
+					continue;
+				}
+
+				const std::int32_t index = IndexInCell(point);
+
+				if (!map->covered.test(index) || !AreNeighboursReady(window, centerCellX, centerCellY, point, cellX, cellY)) {
+					continue;
+				}
+
+				++progress.reachable;
+				progress.resolved += map->resolved.test(index) ? 1 : 0;
+			}
+
+			return progress;
+		}
+
+		// Logs the build progress over the ready cells and the cost of the last interval, every few seconds.
+		// Stays quiet while the scan is idle and nothing changed since the last progress block.
 		void LogStatus(std::int64_t now) {
 			if (g_lastStatusTime == 0) {
 				g_lastStatusTime = now;
@@ -453,12 +709,45 @@ namespace sof::occlusion {
 				return;
 			}
 
-			if (timing::TicksToMicroseconds(static_cast<double>(now - g_lastStatusTime)) < kStatusIntervalSeconds * 1.0e6) {
+			const double intervalSeconds = timing::TicksToMicroseconds(static_cast<double>(now - g_lastStatusTime)) / 1.0e6;
+
+			if (intervalSeconds < kStatusIntervalSeconds) {
 				return;
 			}
 
+			const WorkerStatistics worker = TakeWorkerStatistics();
+
 			std::size_t readyCells = 0;
-			ForEachCellMap([&](CellMap& map) { readyCells += map.ready ? 1 : 0; });
+			std::size_t completeCells = 0;
+
+			ForEachCellMap([&](CellMap& map) {
+				readyCells += map.ready ? 1 : 0;
+				completeCells += map.ready && map.resolvedCount == kPointsPerCell ? 1 : 0;
+			});
+
+			const ScanProgress progress = CountScanProgress();
+			const std::size_t coveredResolved = progress.resolved;
+			const std::size_t covered = progress.reachable;
+			const std::uint32_t pickFaults = engine::GetPickFaultCount();
+			const std::uint32_t newPickFaults = pickFaults - g_lastPickFaults;
+
+			const bool worked = g_statistics.probes > 0 || worker.probes > 0 || coveredResolved != g_lastCoveredResolved;
+
+			if (g_idle && !worked && g_idleLogged) {
+				g_statistics = {};
+				g_lastStatusTime = now;
+				g_lastPickFaults = pickFaults;
+
+				return;
+			}
+
+			const double percent = covered ? 100.0 * coveredResolved / covered : 100.0;
+
+			SOF_LOG("[Map] Progress %.1f%%: %s of %s covered grid points within %s units. %zu of %zu loaded cell%s ready, "
+					"%zu complete.", percent,
+				format::Count(coveredResolved).c_str(), format::Count(covered).c_str(),
+				format::Count(static_cast<std::uint64_t>(g_offsetRadius)).c_str(), readyCells, g_loadedCells.size(),
+				format::Plural(g_loadedCells.size()), completeCells);
 
 			float completedRadius = g_offsetRadius;
 
@@ -466,12 +755,56 @@ namespace sof::occlusion {
 				completedRadius = std::sqrt(static_cast<float>(SquaredLength(g_offsets[g_completed]))) * kGridSpacing;
 			}
 
-			SOF_LOG("[Map] Status: completed radius %.0f of %.0f, %s, %zu of %zu loaded cells ready. %u probes in %u frames, "
-					"%.3f ms average, %.3f ms max per frame.",
-				completedRadius, g_offsetRadius, g_idle ? "idle" : "scanning", readyCells, g_loadedCells.size(),
-				g_statistics.probes, g_statistics.frames, g_statistics.totalMilliseconds / std::max<std::uint32_t>(g_statistics.frames, 1),
-				g_statistics.maxMilliseconds);
+			// Resolved grid points drop when cells unload. The rate then counts as 0 for the interval.
+			const double rate = coveredResolved > g_lastCoveredResolved
+				? (coveredResolved - g_lastCoveredResolved) / intervalSeconds : 0.0;
 
+			if (g_idle) {
+				SOF_LOG("[Map] Scan idle at radius %s.", format::Count(static_cast<std::uint64_t>(g_offsetRadius)).c_str());
+			} else if (rate > 0.0) {
+				SOF_LOG("[Map] Scan at radius %s of %s, %s grid points per second (ETA: %s).",
+					format::Count(static_cast<std::uint64_t>(completedRadius)).c_str(),
+					format::Count(static_cast<std::uint64_t>(g_offsetRadius)).c_str(),
+					format::Count(static_cast<std::uint64_t>(rate)).c_str(),
+					format::Duration((covered - coveredResolved) / rate).c_str());
+			} else {
+				SOF_LOG("[Map] Scan at radius %s of %s, waiting for cells.",
+					format::Count(static_cast<std::uint64_t>(completedRadius)).c_str(),
+					format::Count(static_cast<std::uint64_t>(g_offsetRadius)).c_str());
+			}
+
+			SOF_LOG("[Map] Main thread: %.3fms per frame, %.3fms max, %s probes in %s frames.",
+				g_statistics.totalMilliseconds / std::max<std::uint32_t>(g_statistics.frames, 1), g_statistics.maxMilliseconds,
+				format::Count(g_statistics.probes).c_str(), format::Count(g_statistics.frames).c_str());
+
+			if (config::Get().probe.async && worker.probes == 0) {
+				SOF_LOG("[Map] Worker: no probes.");
+			} else if (config::Get().probe.async) {
+				const double workerFrames = std::max<std::uint32_t>(worker.frames, 1);
+				const double probes = std::max<std::uint32_t>(worker.probes, 1);
+				const double bursts = std::max<std::uint32_t>(worker.bursts, 1);
+
+				SOF_LOG("[Map] Worker: %.3fms per frame, %s probes in %s of %s frames, %.1fµs and %.1f casts per probe, "
+						"%u fault%s.",
+					worker.busyMilliseconds / workerFrames, format::Count(worker.probes).c_str(),
+					format::Count(worker.frames).c_str(), format::Count(g_statistics.asyncFrames).c_str(),
+					worker.busyMilliseconds * 1000.0 / probes, worker.casts / probes, worker.faults, format::Plural(worker.faults));
+
+				SOF_LOG("[Map] Havok lock: %s bursts, %.3fms wait on average, %.3f ms max, %.3f ms longest hold, "
+						"%s tasks queued.",
+					format::Count(worker.bursts).c_str(), worker.lockWaitMilliseconds / bursts, worker.maxLockWaitMilliseconds,
+					worker.maxBurstMilliseconds, format::Count(GetQueuedTaskCount()).c_str());
+			}
+
+			if (g_statistics.retriedPoints > 0 || g_statistics.droppedOutcomes > 0 || newPickFaults > 0) {
+				SOF_LOG("[Map] Retried %s grid points, %s outcomes dropped, %s pick fault%s. %s pick faults since load.",
+					format::Count(g_statistics.retriedPoints).c_str(), format::Count(g_statistics.droppedOutcomes).c_str(),
+					format::Count(newPickFaults).c_str(), format::Plural(newPickFaults), format::Count(pickFaults).c_str());
+			}
+
+			g_idleLogged = g_idle;
+			g_lastCoveredResolved = coveredResolved;
+			g_lastPickFaults = pickFaults;
 			g_statistics = {};
 			g_lastStatusTime = now;
 		}
@@ -504,16 +837,45 @@ namespace sof::occlusion {
 		}
 
 		if (g_offsets.empty() || g_offsetRadius != settings.probe.radius) {
+			if (g_workerActive) {
+				PauseAndRelease();
+			}
+
 			BuildOffsets(settings.probe.radius);
 			ResetScan();
 		}
 
-		UpdateLoadedCells();
+		const bool loadedCellsChanged = UpdateLoadedCells();
+
+		// Results from a frame with cell changes may come from a half attached or detached world.
+		if (g_workerActive && loadedCellsChanged) {
+			PauseAndRelease();
+		}
 
 		const bool cellBecameReady = !g_loadedCells.empty() && CheckNextCellReadiness();
 		const Vector3 position = engine::GetPosition(player);
 
 		MoveCenter(ToGridPoint(position.x, position.y));
+
+		std::size_t appliedOutcomes = 0;
+
+		if (g_workerActive) {
+			g_outcomes.clear();
+			CollectOutcomes(g_outcomes);
+			appliedOutcomes = ApplyOutcomes(g_outcomes);
+			g_lastWorkerProbes = g_outcomes.size();
+		}
+
+		g_framesSinceCellChange = loadedCellsChanged ? 0 : std::min(g_framesSinceCellChange + 1, kWorkerSettleFrames);
+
+		// The scan queues only grid points whose cell and border neighbours are ready.
+		// Cells still waiting for occluder 3D do not hold the worker back.
+		const bool workerAllowed = settings.probe.async && !g_loadedCells.empty()
+			&& g_framesSinceCellChange >= kWorkerSettleFrames;
+
+		if (g_workerActive && !workerAllowed) {
+			PauseAndRelease();
+		}
 
 		if (cellBecameReady) {
 			g_cursor = g_completed;
@@ -522,8 +884,24 @@ namespace sof::occlusion {
 
 		std::uint32_t probes = 0;
 
-		if (!g_idle) {
-			probes = Scan(settings.probe.budget * 1000.0, startTime);
+		if (workerAllowed) {
+			StartWorker();
+
+			const std::size_t target = std::clamp(std::max(kMinQueuedTasks, std::max<std::size_t>(settings.probe.batchSize * 4,
+				g_lastWorkerProbes * kQueueFramesAhead)), kMinQueuedTasks, kMaxQueuedTasks);
+			const std::size_t queued = GetQueuedTaskCount();
+
+			if (!g_idle && queued < target) {
+				g_tasks.clear();
+				Scan(settings.probe.syncBudget * 1000.0, startTime, cell, target - queued);
+				SubmitTasks(g_tasks);
+			}
+
+			BeginWorkerFrame(cell, settings.probe.asyncBudget, settings.probe.batchSize, settings.probe.probeHeight);
+			g_workerActive = true;
+			++g_statistics.asyncFrames;
+		} else if (!g_idle) {
+			probes = Scan(settings.probe.syncBudget * 1000.0, startTime, cell, 0);
 		}
 
 		const double milliseconds = timing::TicksToMilliseconds(static_cast<double>(timing::Now() - startTime));
@@ -534,14 +912,36 @@ namespace sof::occlusion {
 		g_statistics.maxMilliseconds = std::max(g_statistics.maxMilliseconds, milliseconds);
 
 		if (settings.debug.logMap) {
-			LogStatus(timing::Now());
+			const std::int64_t now = timing::Now();
+			const bool scanning = !g_idle || appliedOutcomes > 0 || (g_workerActive && GetQueuedTaskCount() > 0);
+
+			TrackScanRun(scanning, probes + appliedOutcomes, now);
+			LogStatus(now);
 		}
+	}
+
+	// Builds the ring offsets for the configured radius. The sort takes several milliseconds,
+	// so it runs at load instead of on the first frame. A changed radius rebuilds them on the next frame.
+	//
+	// Thread: Main (load time only)
+	void InitializeBuilder() {
+		const std::int64_t startTime = timing::Now();
+
+		BuildOffsets(config::Get().probe.radius);
+
+		SOF_LOG("[Map] Built %s ring offsets for radius %s in %.1f ms.", format::Count(g_offsets.size()).c_str(),
+			format::Count(static_cast<std::uint64_t>(g_offsetRadius)).c_str(),
+			timing::TicksToMilliseconds(static_cast<double>(timing::Now() - startTime)));
 	}
 
 	// Clears all occlusion maps and the scan state. Called on game load and on exit to the main menu.
 	//
 	// Thread: Main
 	void ResetBuilder() {
+		if (g_workerActive) {
+			PauseAndRelease();
+		}
+
 		ClearMaps();
 		ResetScan();
 
@@ -550,7 +950,12 @@ namespace sof::occlusion {
 		g_loadedKeys.clear();
 		g_readinessChecks.clear();
 		g_statistics = {};
+		g_scanRun = {};
+		g_framesSinceCellChange = 0;
 		g_lastStatusTime = 0;
+		g_lastCoveredResolved = 0;
+		g_idleLogged = false;
+		g_lastPickFaults = engine::GetPickFaultCount();
 	}
 
 }

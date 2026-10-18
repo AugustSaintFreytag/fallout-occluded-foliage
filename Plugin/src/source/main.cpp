@@ -3,6 +3,7 @@
 #include "nvse/nvse_minimal.h"
 
 #include "config/settings.h"
+#include "debug/physics_probe.h"
 #include "input/hotkeys.h"
 #include "occlusion/builder.h"
 #include "utils/log.h"
@@ -21,6 +22,7 @@ namespace {
 		switch (message->type) {
 		case NVSEMessagingInterface::kMessage_MainGameLoop:
 			sof::threads::RememberMainThread();
+			sof::debug::UpdatePhysicsProbe();
 			sof::input::PollHotkeys();
 
 			if (sof::config::Get().general.enabled) {
@@ -30,12 +32,19 @@ namespace {
 			break;
 
 		case NVSEMessagingInterface::kMessage_PostLoadGame:
-			SOF_LOG("Game loaded.");
+			SOF_LOG("Loaded game.");
 			sof::occlusion::ResetBuilder();
 			break;
 
 		case NVSEMessagingInterface::kMessage_ExitToMainMenu:
+			// Probably never happens in a typical modern NV game.
 			SOF_LOG("Exited to main menu.");
+			sof::occlusion::ResetBuilder();
+			break;
+
+		// Stops the async worker before the game shuts Havok down.
+		case NVSEMessagingInterface::kMessage_ExitGame:
+		case NVSEMessagingInterface::kMessage_ExitGame_Console:
 			sof::occlusion::ResetBuilder();
 			break;
 
@@ -76,12 +85,18 @@ __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface* nvse) {
 	auto* messaging = static_cast<NVSEMessagingInterface*>(nvse->QueryInterface(kInterface_Messaging));
 
 	if (!messaging || messaging->version < 4 || !messaging->RegisterListener(pluginHandle, "NVSE", OnMessage)) {
-		SOF_LOG("Error: Messaging interface is unavailable or defunct.");
+		SOF_LOG("Error: Messaging interface is unavailable or unusable.");
 
 		return false;
 	}
 
-	SOF_LOG("Plugin loaded.");
+	sof::occlusion::InitializeBuilder();
+
+	if (!sof::debug::InstallPhysicsProbe()) {
+		SOF_LOG("Error: Could not install Havok probing module.");
+	}
+
+	SOF_LOG("Loaded plugin.");
 
 	return true;
 }

@@ -14,8 +14,8 @@ namespace sof::timing {
 		return counter.QuadPart;
 	}
 
-	// Converts counter ticks to microseconds.
-	inline double TicksToMicroseconds(double ticks) {
+	// Returns the `QueryPerformanceCounter` ticks per second.
+	inline std::int64_t Frequency() {
 		static const std::int64_t frequency = [] {
 			LARGE_INTEGER value{};
 			QueryPerformanceFrequency(&value);
@@ -23,12 +23,22 @@ namespace sof::timing {
 			return value.QuadPart;
 		}();
 
-		return ticks * 1'000'000.0 / static_cast<double>(frequency);
+		return frequency;
+	}
+
+	// Converts counter ticks to microseconds.
+	inline double TicksToMicroseconds(double ticks) {
+		return ticks * 1'000'000.0 / static_cast<double>(Frequency());
 	}
 
 	// Converts counter ticks to milliseconds.
 	inline double TicksToMilliseconds(double ticks) {
 		return TicksToMicroseconds(ticks) / 1000.0;
+	}
+
+	// Converts milliseconds to counter ticks.
+	inline std::int64_t MillisecondsToTicks(double milliseconds) {
+		return static_cast<std::int64_t>(milliseconds * static_cast<double>(Frequency()) / 1000.0);
 	}
 
 }

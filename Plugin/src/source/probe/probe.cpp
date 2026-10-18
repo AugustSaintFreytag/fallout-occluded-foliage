@@ -1,38 +1,37 @@
-// Probe rays for single grid points.
+// Raycast Occluder Probing
 //
 // A probe casts down from the probe height above the terrain to just below the terrain.
-// The grid point is occluded if the ray hits an occluder before the land.
-// A ray that starts inside an occluder's collision misses it (Experimental Acoustics finding).
-// So a probe that finds nothing on the way down casts up again from just above the terrain.
+// A grid point is occluded if the ray hits a valid occluder between start and terrain.
+// Rays starting already inside an occluder will not register as hit. 
+// Casting again from an offset position can find large occluders missed from default height.
 
 #include "probe/probe.h"
 
 #include "engine/addresses.h"
 #include "engine/objects.h"
-#include "engine/terrain.h"
 #include "utils/vector3.h"
 
 namespace sof::probe {
 
 	namespace {
 
-		// Engine AI sight ray. The ray layer does not filter hits, so the probe filters by hit layer and reference.
+		// Ray layer to use for probing.
+		// Layer `kLayer_LineOfSight` is used by engine for line of sight detection.
 		constexpr std::uint8_t kRayLayer = engine::kLayer_LineOfSight;
 
-		// Distance to skip past a hit before the next cast.
-		constexpr float kStepPastHit = 1.0f;  // Game units
+		// Stepping distance/stride for raycasts (game units).
+		constexpr float kStepPastHit = 1.0f;
 
-		// End of the down ray below the terrain. Covers the gap between land height and terrain collision.
-		constexpr float kDepthBelowTerrain = 8.0f;  // Game units
+		// Tolerance between assumed land height and actual terrain collision (game units).
+		constexpr float kDepthBelowTerrain = 16.0f;
 
-		// Start of the up ray above the terrain.
-		constexpr float kHeightAboveTerrain = 1.0f;  // Game units
+		// Height to start casting from when casting upwards from terrain (reverse probe) (game units).
+		constexpr float kHeightAboveTerrain = 1.0f;
 
-		// Hits per ray before the probe gives up on that ray. Clutter and actors on top of a floor add hits.
+		// Number of allowed hits per ray before probe assumes occlusion.
 		constexpr int kMaxHitsPerRay = 8;
 
-		// Returns the role of a hit. The reference decides before the layer.
-		// Land collision has no reference and uses layer `Ground`.
+		// Classifies and returns the hit kind for the given individual raycast result.
 		HitKind ClassifyHit(const engine::RaycastResult& hit) {
 			if (IsOccluder(hit.reference)) {
 				return HitKind::Occluder;
@@ -45,18 +44,23 @@ namespace sof::probe {
 			return HitKind::Passed;
 		}
 
-		// Casts between two points and again from just past each hit that is not an occluder.
+		// Casts between two points and returns the hit reference or null.
+		// When ray did not hit, apply offset and retry for max hits per ray.
 		// Returns the first occluder hit, or null.
-		// A down ray ends at the terrain. An up ray passes terrain, which is an overhang there.
-		void* CastThrough(const Vector3& from, const Vector3& to, bool upward, ProbeResult& result,
+		void* CastThrough(void* cell, const Vector3& from, const Vector3& to, bool upward, ProbeResult& result,
 			const TraceCallback& trace) {
 			const Vector3 step = Normalize(to - from) * kStepPastHit;
 			const float totalLength = Distance(from, to);
 			Vector3 start = from;
 
 			for (int hitIndex = 0; hitIndex < kMaxHitsPerRay; ++hitIndex) {
-				const engine::RaycastResult hit = engine::CastRay(start, to, kRayLayer);
+				const engine::RaycastResult hit = engine::CastRayInCell(cell, start, to, kRayLayer);
 				++result.casts;
+
+				if (hit.faulted) {
+					result.faulted = true;
+					return nullptr;
+				}
 
 				if (!hit.hit) {
 					return nullptr;
@@ -100,47 +104,51 @@ namespace sof::probe {
 			return "NoTerrain";
 
 		default:
-			return "?";
+			return "Unknown";
 		}
 	}
 
-	// Checks if a given reference hides grass under it. Statics and static collections do.
+	// Checks if a given reference should be a foliage occluder.
+	//
+	// Engine built-in statics do not have associated meshes (e.g. markers).
+	// Built-in `CollisionMarker` has no 3D mesh but still has collision (not relevant for us).
 	bool IsOccluder(void* reference) {
 		if (!reference) {
 			return false;
 		}
 
-		const std::uint8_t baseType = engine::GetFormType(engine::GetBaseForm(reference));
+		void* baseForm = engine::GetBaseForm(reference);
+		const std::uint8_t baseType = engine::GetFormType(baseForm);
 
-		return baseType == engine::kFormType_TESObjectSTAT || baseType == engine::kFormType_BGSStaticCollection;
-	}
-
-	// Probes the grid point at the given world position for an occluder within the given height above the terrain.
-	// Calls the trace callback for each hit, if one is given.
-	//
-	// Thread: Main
-	ProbeResult ProbePoint(float x, float y, float probeHeight, const TraceCallback& trace) {
-		ProbeResult result;
-
-		if (!engine::GetLandHeight({x, y, 0.0f}, result.terrainHeight)) {
-			result.verdict = Verdict::NoTerrain;
-
-			return result;
+		if (baseType != engine::kFormType_TESObjectSTAT && baseType != engine::kFormType_BGSStaticCollection) {
+			return false;
 		}
 
-		const Vector3 top{x, y, result.terrainHeight + probeHeight};
-		const Vector3 bottom{x, y, result.terrainHeight - kDepthBelowTerrain};
+		return engine::GetFormID(baseForm) >= engine::kPluginHeadFormID;
+	}
 
-		result.occluder = CastThrough(top, bottom, false, result, trace);
+	// Probes the grid point at a given world position for an occluder within the probe height above the terrain.
+	// Casts in the Havok world of the given cell. Calls the trace callback for each hit, if one is given.
+	// When faulting, the created result does not hold a verdict.
+	//
+	// Thread: Any (off-main, caller must lock/release)
+	ProbeResult ProbePoint(void* cell, float x, float y, float terrainHeight, float probeHeight, const TraceCallback& trace) {
+		ProbeResult result;
+		result.terrainHeight = terrainHeight;
 
-		if (!result.occluder) {
-			const Vector3 ground{x, y, result.terrainHeight + kHeightAboveTerrain};
+		const Vector3 top{x, y, terrainHeight + probeHeight};
+		const Vector3 bottom{x, y, terrainHeight - kDepthBelowTerrain};
 
-			result.occluder = CastThrough(ground, top, true, result, trace);
+		result.occluder = CastThrough(cell, top, bottom, false, result, trace);
+
+		if (!result.occluder && !result.faulted) {
+			const Vector3 ground{x, y, terrainHeight + kHeightAboveTerrain};
+
+			result.occluder = CastThrough(cell, ground, top, true, result, trace);
 			result.foundByUpRay = result.occluder != nullptr;
 		}
 
-		if (result.occluder) {
+		if (result.occluder && !result.faulted) {
 			result.verdict = Verdict::Occluded;
 		}
 

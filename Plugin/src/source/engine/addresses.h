@@ -21,6 +21,10 @@ namespace sof::engine {
 	// NiAVObject* __thiscall TES::PickObject(PickData*, bool). Nearest hit only. (JIP, SEA; EXE: ret 8)
 	constexpr std::uintptr_t kTES_PickObject = 0x458440;
 
+	// NiAVObject* __thiscall TESObjectCELL::PickObject(PickData*). Picks in the cell's Havok world (0x4543C0)
+	// and converts the hit to a scene graph object. TES::PickObject calls it for the current cell. (EXE: ret 4)
+	constexpr std::uintptr_t kCell_PickObject = 0x553EE0;
+
 	// bool __thiscall TES::GetLandHeight(const NiPoint3*, float*). Reads x and y.
 	// Writes a default height first, returns false if no loaded cell holds the position.
 	// Calls `TESObjectLAND::GetLandHeight` (0x53F180) for the land of that cell. (JIP, JG; EXE: ret 8)
@@ -56,6 +60,9 @@ namespace sof::engine {
 	constexpr std::uintptr_t kRefr_InDisabledSet = 0x5AA630;
 	constexpr std::uintptr_t kForm_TypeID = 0x04;  // UInt8
 	constexpr std::uintptr_t kForm_RefID = 0x0C;
+
+	// Form IDs below are engine built-ins, such as `XMarker` (0x3B), `MapMarker` (0x10) and `CollisionMarker` (0x21). (RUN)
+	constexpr std::uint32_t kPluginHeadFormID = 0x800;
 	constexpr std::uintptr_t kFormVtbl_GetEditorID = 0x130;  // const char* (__thiscall*)() (JIP)
 
 	constexpr std::uint8_t kFormType_TESObjectACTI = 0x15;
@@ -145,6 +152,43 @@ namespace sof::engine {
 	constexpr std::uintptr_t kGrassAddInstanceCall = 0xB62FC1;
 
 	// Havok
+	// void __thiscall bhkWorld::Update(). Steps the Havok world under `hkpWorld::lock` (0xC91B10, 0xC91BD0). (JIP; EXE: ret)
+	// Both vtables point to 0xC6AE70. (EXE)
+	constexpr std::uintptr_t kVtbl_bhkWorld = 0x10C40B4;  // (JIP)
+	constexpr std::uintptr_t kVtbl_bhkWorldM = 0x10C69F4;  // (JIP)
+	constexpr std::uintptr_t kWorldVtbl_Update = 0xC4;
+
+	// Global recursive Havok lock. `hkpWorld::lock` (0xC91180) and the world step take it. void __cdecl(), no arguments.
+	// Lock object at [0x12681D4]: CRITICAL_SECTION at +0x18, recursion count at +0x0C, owner in TLS slot [0x12681D8]. (EXE)
+	constexpr std::uintptr_t kHavok_EnterGlobalLock = 0xC90490;
+	constexpr std::uintptr_t kHavok_LeaveGlobalLock = 0xC904E0;
+	constexpr std::uintptr_t kHavokGlobalLock = 0x12681D4;  // Lock object*, null before Havok init
+
+	// Havok per-thread state. Every thread that calls into Havok needs a memory router, a stack area and a monitor stream.
+	// `bhkWorld::PickObject` (0xC696D0) reads the monitor stream from TLS slot [0x126835C] without a null check.
+	// Ray casts bump the router's stack cursor inline without a bounds check (0xD1651F).
+	// Setup as in Bethesda's thread setup at 0x8C6FF0, teardown at 0x8C7110. (EXE)
+	// void __thiscall hkMemoryRouter::hkMemoryRouter(). Zeroes 0x20 bytes. `threadInit` also writes +0x20. (EXE: ret)
+	constexpr std::uintptr_t kHavok_MemoryRouterConstructor = 0xC85770;
+	// hkMemorySystem* __cdecl hkMemorySystem::getInstance(). Reads [0x1268418]. (EXE)
+	constexpr std::uintptr_t kHavok_GetMemorySystem = 0xCBBFC0;
+	// void __thiscall hkMemorySystem::threadInit(hkMemoryRouter&, const char* name, int flags). (EXE: 0xCD0830, ret 0xC)
+	// Flag 1 claims one of 32 thread slots and sets the heap allocator. Flag 2 would allocate the stack area,
+	// but the game's memory system has a stack size of 0. Bethesda threads pass 1 and set up their own stack.
+	constexpr std::uintptr_t kMemorySystemVtbl_ThreadInit = 0x0C;
+	constexpr int kHavokThreadInitHeap = 1;
+	// void __cdecl hkBaseSystem::initThread(hkMemoryRouter*). Sets router TLS [0x1268108], then `hkMonitorStream::init`
+	// (0xCB0DB0) sets an empty monitor stream in TLS [0x126835C]. (EXE)
+	constexpr std::uintptr_t kHavok_InitThread = 0xCBB930;
+	constexpr std::uintptr_t kHavokMemoryRouterSize = 0x24;
+	constexpr std::uintptr_t kMemoryRouter_StackCursor = 0x00;  // Next free byte of the stack area (EXE)
+	constexpr std::uintptr_t kMemoryRouter_StackBase = 0x04;  // (EXE)
+	constexpr std::uintptr_t kMemoryRouter_StackEnd = 0x08;  // (EXE)
+	constexpr std::uintptr_t kMemoryRouter_Temp = 0x0C;  // Allocator*, Bethesda threads set the heap (EXE)
+	constexpr std::uintptr_t kMemoryRouter_Heap = 0x10;  // Allocator*, set by `threadInit` (EXE)
+	constexpr std::uintptr_t kMemoryRouter_Solver = 0x18;  // Allocator*, Bethesda threads set the heap (EXE)
+	constexpr std::uintptr_t kHavokThreadStackSize = 0x32000;  // Bethesda threads, 200 KB (EXE)
+
 	constexpr float kHavokScale = 0.1428571f;  // Game units -> Havok units (1/7) (JIP kUnitConv)
 	constexpr std::uintptr_t kCdBody_Parent = 0x0C;  // hkCdBody*, null for the root collidable (JIP)
 	constexpr std::uintptr_t kRootCdBody_Layer = 0x1C;  // Root hkCdBody is hkpWorldObject +0x10. Layer at hkpWorldObject +0x2C. (JIP)

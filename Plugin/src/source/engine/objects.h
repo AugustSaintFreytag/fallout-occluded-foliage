@@ -20,5 +20,6 @@ namespace sof::engine {
 	Vector3 GetPosition(void* reference);
 
 	const char* GetModelPath(void* baseForm);
+	bool HasMarkerModel(void* baseForm);
 
 }

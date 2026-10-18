@@ -6,6 +6,8 @@ namespace sof::log {
 
 	void Write(const char* format, ...);
 
+	void SetThreadName(const char* name);
+
 }
 
 #define SOF_LOG(...) ::sof::log::Write(__VA_ARGS__)
