@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <xmmintrin.h>
@@ -64,9 +65,83 @@ namespace sof::engine {
 			"ItemPick", "LineOfSight", "PathPick", "CustomPick1", "CustomPick2", "SpellExplosion", "DroppingPick",
 		};
 
+		// Pick faults logged one by one after the plugin loads. Later faults are only counted.
+		constexpr std::uint32_t kMaxLoggedPickFaults = 16;
+
+		// Frame pointer chain entries logged per pick fault.
+		constexpr int kLoggedCallers = 6;
+
 		// Thread: Any
 		std::atomic<bool> g_pickFailureLogged{false};
 		std::atomic<std::uint32_t> g_pickFaults{0};
+
+		// Copy of an engine exception, taken in the exception filter.
+		struct PickFault {
+			std::uint32_t code = 0;
+			void* address = nullptr;
+			std::uint32_t accessType = 0;  // 0 = read, 1 = write, 8 = execute
+			std::uint32_t accessAddress = 0;
+			bool hasAccess = false;
+			std::uint32_t framePointer = 0;
+		};
+
+		// Copies the exception record and the frame pointer for the handler. Logging waits for the handler.
+		int CapturePickFault(const EXCEPTION_POINTERS* exception, PickFault& fault) {
+			const EXCEPTION_RECORD* record = exception->ExceptionRecord;
+
+			fault.code = record->ExceptionCode;
+			fault.address = record->ExceptionAddress;
+			fault.hasAccess = record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2;
+
+			if (fault.hasAccess) {
+				fault.accessType = static_cast<std::uint32_t>(record->ExceptionInformation[0]);
+				fault.accessAddress = static_cast<std::uint32_t>(record->ExceptionInformation[1]);
+			}
+
+			fault.framePointer = exception->ContextRecord->Ebp;
+
+			return EXCEPTION_EXECUTE_HANDLER;
+		}
+
+		// Counts a pick fault and logs the first few with their return addresses along the frame pointer chain.
+		// Frames of code built without frame pointers are missing from the chain.
+		void RecordPickFault(const PickFault& fault) {
+			const std::uint32_t count = g_pickFaults.fetch_add(1, std::memory_order_relaxed) + 1;
+
+			if (count > kMaxLoggedPickFaults) {
+				return;
+			}
+
+			char callers[kLoggedCallers * 10 + 1] = "";
+			std::size_t length = 0;
+			std::uint32_t frame = fault.framePointer;
+
+			for (int depth = 0; depth < kLoggedCallers && frame != 0; ++depth) {
+				std::uint32_t returnAddress = 0;
+				std::uint32_t nextFrame = 0;
+
+				if (!mem::SafeRead32(reinterpret_cast<void*>(frame + 4), returnAddress)
+					|| !mem::SafeRead32(reinterpret_cast<void*>(frame), nextFrame)) {
+					break;
+				}
+
+				length += std::snprintf(callers + length, sizeof(callers) - length, " %08X", returnAddress);
+
+				if (nextFrame <= frame) {
+					break;
+				}
+
+				frame = nextFrame;
+			}
+
+			if (fault.hasAccess) {
+				SOF_LOG("[Havok] Pick fault %u: access violation at %p, %s %08X. Callers:%s", count, fault.address,
+					fault.accessType == 1 ? "writing" : (fault.accessType == 8 ? "executing" : "reading"), fault.accessAddress,
+					callers);
+			} else {
+				SOF_LOG("[Havok] Pick fault %u: exception %08X at %p. Callers:%s", count, fault.code, fault.address, callers);
+			}
+		}
 
 		// Returns the collision group of the player's character controller. A ray with this group ignores the player.
 		// Returns 0 if the chain is not available, for example before the player has loaded in.
@@ -97,7 +172,7 @@ namespace sof::engine {
 
 		// Runs an engine object pick with the given pick properties. Returns the object hit, or null.
 		// Property `hitFraction` is less than 1 if the ray hit an object or geometry.
-		// An exception in the engine counts as no hit and sets the given fault flag.
+		// An exception in the engine counts as no hit, sets the given fault flag and is recorded.
 		void* PickObject(PickProperties* pickProperties, bool& faulted) {
 			void* tes = mem::Global<void*>(kTESSingleton);
 
@@ -107,28 +182,36 @@ namespace sof::engine {
 
 			const auto pickObject = reinterpret_cast<PickObjectFn>(kTES_PickObject);
 
+			PickFault fault;
+
 			__try {
 				return pickObject(tes, pickProperties, true);
-			} __except (EXCEPTION_EXECUTE_HANDLER) {
+			} __except (CapturePickFault(GetExceptionInformation(), fault)) {
 				pickProperties->hitFraction = 1.0f;
 				faulted = true;
-
-				return nullptr;
 			}
+
+			RecordPickFault(fault);
+
+			return nullptr;
 		}
 
 		// Runs a pick in the Havok world of a given cell, without TES state. Otherwise like `PickObject`.
 		void* PickObjectInCell(void* cell, PickProperties* pickProperties, bool& faulted) {
 			const auto pickObject = reinterpret_cast<CellPickObjectFn>(kCell_PickObject);
 
+			PickFault fault;
+
 			__try {
 				return pickObject(cell, pickProperties);
-			} __except (EXCEPTION_EXECUTE_HANDLER) {
+			} __except (CapturePickFault(GetExceptionInformation(), fault)) {
 				pickProperties->hitFraction = 1.0f;
 				faulted = true;
-
-				return nullptr;
 			}
+
+			RecordPickFault(fault);
+
+			return nullptr;
 		}
 
 		// Checks if objects on a given layer move or get destroyed.
@@ -223,10 +306,6 @@ namespace sof::engine {
 		RaycastResult result;
 		void* object = PickObject(&pickProperties, result.faulted);
 
-		if (result.faulted) {
-			g_pickFaults.fetch_add(1, std::memory_order_relaxed);
-		}
-
 		if (pickProperties.hitFraction >= 1.0f) {
 			return result;
 		}
@@ -256,10 +335,6 @@ namespace sof::engine {
 
 		RaycastResult result;
 		void* object = PickObjectInCell(cell, &pickProperties, result.faulted);
-
-		if (result.faulted) {
-			g_pickFaults.fetch_add(1, std::memory_order_relaxed);
-		}
 
 		if (pickProperties.hitFraction >= 1.0f) {
 			return result;
@@ -298,9 +373,12 @@ namespace sof::engine {
 		return true;
 	}
 
-	// Sets up the Havok memory router and monitor stream for the calling thread, like Havok's own job threads.
-	// Picks and other Havok calls fault on a thread without them. Call once per thread, before any Havok call.
-	// The state lives until the thread ends. Returns false if Havok has no memory system yet.
+	// Sets up the Havok memory router, stack area and monitor stream for the calling thread, like Bethesda's threads.
+	// Picks and other Havok calls fault or write through a null stack on a thread without them.
+	// Call once per thread, before any Havok call. The state lives until the thread ends.
+	// Returns false if Havok has no memory system yet or the stack area could not be allocated.
+	//
+	// The stack area is followed by a reserved page. An overflow faults there instead of writing past the area.
 	//
 	// Thread: Any, except threads the game created
 	bool InitializeHavokThread(const char* name) {
@@ -314,17 +392,35 @@ namespace sof::engine {
 			return false;
 		}
 
-		// Havok job threads need to run with flush-to-zero flag.
+		SYSTEM_INFO system{};
+		GetSystemInfo(&system);
+
+		const std::size_t stackSize = kHavokThreadStackSize;
+		auto* stack = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, stackSize + system.dwPageSize, MEM_RESERVE, PAGE_NOACCESS));
+
+		if (!stack || !VirtualAlloc(stack, stackSize, MEM_COMMIT, PAGE_READWRITE)) {
+			return false;
+		}
+
+		// Havok job threads run with flush-to-zero.
 		_mm_setcsr(_mm_getcsr() | _MM_FLUSH_ZERO_ON);
 
 		reinterpret_cast<MemoryRouterConstructorFn>(kHavok_MemoryRouterConstructor)(router);
 
 		const auto threadInit = Field<ThreadInitFn>(Field<void*>(memorySystem, 0), kMemorySystemVtbl_ThreadInit);
-		threadInit(memorySystem, router, name, 3);
+		threadInit(memorySystem, router, name, kHavokThreadInitHeap);
 
 		reinterpret_cast<InitThreadFn>(kHavok_InitThread)(router);
-		
-		return true;
+
+		void* heap = Field<void*>(router, kMemoryRouter_Heap);
+
+		Field<void*>(router, kMemoryRouter_Temp) = heap;
+		Field<void*>(router, kMemoryRouter_Solver) = heap;
+		Field<void*>(router, kMemoryRouter_StackCursor) = stack;
+		Field<void*>(router, kMemoryRouter_StackBase) = stack;
+		Field<void*>(router, kMemoryRouter_StackEnd) = stack + stackSize;
+
+		return heap != nullptr;
 	}
 
 	// Releases the global Havok lock taken by `LockHavok`.
