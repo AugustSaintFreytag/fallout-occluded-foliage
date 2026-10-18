@@ -4,6 +4,7 @@
 #include "engine/havok.h"
 #include "engine/objects.h"
 #include "engine/scene.h"
+#include "engine/terrain.h"
 #include "engine/ui.h"
 #include "occlusion/map.h"
 #include "probe/probe.h"
@@ -112,12 +113,31 @@ namespace sof::debug {
 		SOF_LOG("[Probe] Point (%.1f, %.1f, %.1f), Layer %u (%s), %s. Probe height %.0f:", aim.point.x, aim.point.y,
 			aim.point.z, aim.layer, engine::CollisionLayerName(aim.layer), aimText, probeHeight);
 
-		const probe::ProbeResult result = probe::ProbePoint(aim.point.x, aim.point.y, probeHeight, LogTraceHit);
+		void* cell = engine::GetParentCell(engine::GetPlayer());
+		float terrainHeight = 0.0f;
+
+		if (!cell || !engine::GetLandHeight(aim.point, terrainHeight)) {
+			SOF_LOG("[Probe] No land under the point.");
+			engine::ShowNotification("Probe: NoTerrain");
+
+			return;
+		}
+
+		const probe::ProbeResult result = probe::ProbePoint(cell, aim.point.x, aim.point.y, terrainHeight, probeHeight, LogTraceHit);
 
 		// Time a second probe without the trace. Log writes in the trace take longer than the casts.
 		const std::int64_t startTime = timing::Now();
-		probe::ProbePoint(aim.point.x, aim.point.y, probeHeight);
+		probe::ProbePoint(cell, aim.point.x, aim.point.y, terrainHeight, probeHeight);
 		const double microseconds = timing::TicksToMicroseconds(static_cast<double>(timing::Now() - startTime));
+
+		// Compare the land height with the interpolated cache of the map.
+		const occlusion::GridPoint gridPoint = occlusion::ToGridPoint(aim.point.x, aim.point.y);
+		const occlusion::CellMap* map = occlusion::FindCellMap(occlusion::CellOf(gridPoint.x), occlusion::CellOf(gridPoint.y));
+		float cachedHeight = 0.0f;
+
+		if (map && occlusion::LandHeightAt(*map, aim.point.x, aim.point.y, cachedHeight)) {
+			SOF_LOG("[Probe] Land height %.1f, cached %.1f (%+.1f).", terrainHeight, cachedHeight, cachedHeight - terrainHeight);
+		}
 
 		char occluderText[320];
 		DescribeReference(result.occluder, occluderText, sizeof(occluderText));

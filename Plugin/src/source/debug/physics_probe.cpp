@@ -11,6 +11,7 @@
 
 #include "config/settings.h"
 #include "engine/addresses.h"
+#include "utils/formatting.h"
 #include "utils/log.h"
 #include "utils/memory.h"
 #include "utils/threads.h"
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <mutex>
 
 namespace sof::debug {
@@ -78,12 +80,12 @@ namespace sof::debug {
 			if (!statistics) {
 				if (g_threadCount == kMaxThreads) {
 					++g_droppedSteps;
-
 					return;
 				}
 
 				statistics = &g_threads[g_threadCount++];
 				*statistics = {};
+				
 				statistics->threadId = threadId;
 			}
 
@@ -131,24 +133,32 @@ namespace sof::debug {
 
 			const double mainLoops = std::max<std::uint32_t>(g_mainLoops, 1);
 
-			SOF_LOG("[Physics] %u main loop messages, %u of them while a step ran on another thread. Frame %.3f ms average, "
-					"%.3f ms max. Delay after each step: %.2f ms.",
-				g_mainLoops, g_mainLoopsDuringStep, g_totalFrameMilliseconds / mainLoops, g_maxFrameMilliseconds,
-				g_delayInterval ? delayMilliseconds : 0.0);
+			SOF_LOG("[Physics] Measured %s frames: %.3f ms average, %.3f ms max, %s during a step on another thread. "
+					"Step delay %.2f ms.",
+				format::Count(g_mainLoops).c_str(), g_totalFrameMilliseconds / mainLoops, g_maxFrameMilliseconds,
+				format::Count(g_mainLoopsDuringStep).c_str(), g_delayInterval ? delayMilliseconds : 0.0);
 
 			for (std::size_t index = 0; index < g_threadCount; ++index) {
 				const ThreadStatistics& statistics = g_threads[index];
 				const double steps = std::max<std::uint32_t>(statistics.steps, 1);
 
-				SOF_LOG("[Physics]   Thread %u (%s): %u steps, %.3f ms average, %.3f ms max, start %.2f ms after the main loop "
-						"message on average. Measured delay %.3f ms per step.",
-					statistics.threadId, statistics.threadId == threads::MainThreadId() ? "main" : "other", statistics.steps,
+				char thread[24];
+
+				if (statistics.threadId == threads::MainThreadId()) {
+					std::snprintf(thread, sizeof(thread), "main thread");
+				} else {
+					std::snprintf(thread, sizeof(thread), "thread %u", statistics.threadId);
+				}
+
+				SOF_LOG("[Physics] Stepped %s time%s on %s: %.3f ms average, %.3f ms max, starting %.2f ms into the frame, "
+						"%.3f ms delay.",
+					format::Count(statistics.steps).c_str(), format::Plural(statistics.steps), thread,
 					statistics.totalMicroseconds / steps / 1000.0, statistics.maxMicroseconds / 1000.0,
 					statistics.totalStartAfterMainLoop / steps / 1000.0, statistics.totalDelayMicroseconds / steps / 1000.0);
 			}
 
 			if (g_droppedSteps > 0) {
-				SOF_LOG("[Physics]   %u steps on further threads not counted.", g_droppedSteps);
+				SOF_LOG("[Physics] Skipped %s steps on further threads.", format::Count(g_droppedSteps).c_str());
 			}
 
 			g_threadCount = 0;
@@ -175,7 +185,7 @@ namespace sof::debug {
 		g_originalWorldMUpdate = static_cast<UpdateFn>(mem::PatchPointer(engine::kVtbl_bhkWorldM + engine::kWorldVtbl_Update,
 			reinterpret_cast<void*>(&Hook_WorldUpdate)));
 
-		SOF_LOG("Hooks: bhkWorld::Update %p, bhkWorldM::Update %p -> %p", g_originalWorldUpdate, g_originalWorldMUpdate,
+		SOF_LOG("[Physics] Patched bhkWorld::Update %p and bhkWorldM::Update %p to %p.", g_originalWorldUpdate, g_originalWorldMUpdate,
 			reinterpret_cast<void*>(&Hook_WorldUpdate));
 
 		return g_originalWorldUpdate && g_originalWorldMUpdate;
@@ -210,7 +220,6 @@ namespace sof::debug {
 
 		if (g_lastStatus == 0) {
 			g_lastStatus = now;
-
 			return;
 		}
 
