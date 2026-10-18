@@ -105,14 +105,20 @@ namespace sof::probe {
 	}
 
 	// Checks if a given reference hides grass under it. Statics and static collections do.
+	// Engine built-in statics do not: markers have no 3D, `CollisionMarker` is an invisible collision box.
 	bool IsOccluder(void* reference) {
 		if (!reference) {
 			return false;
 		}
 
-		const std::uint8_t baseType = engine::GetFormType(engine::GetBaseForm(reference));
+		void* baseForm = engine::GetBaseForm(reference);
+		const std::uint8_t baseType = engine::GetFormType(baseForm);
 
-		return baseType == engine::kFormType_TESObjectSTAT || baseType == engine::kFormType_BGSStaticCollection;
+		if (baseType != engine::kFormType_TESObjectSTAT && baseType != engine::kFormType_BGSStaticCollection) {
+			return false;
+		}
+
+		return engine::GetFormID(baseForm) >= engine::kFirstPluginFormID;
 	}
 
 	// Probes the grid point at the given world position for an occluder within the given height above the terrain.
