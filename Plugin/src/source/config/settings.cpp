@@ -85,15 +85,6 @@ namespace sof::config {
 			debug.physicsProbeDelay = std::clamp(physicsProbeDelay, 0.0f, 50.0f);
 		}
 
-		void LogSettings(const Settings& settings) {
-			SOF_LOG("Config general: Enabled=%d", settings.general.enabled);
-			SOF_LOG("Config probe: ProbeHeight=%.0f Budget=%.2fms Radius=%.0f", settings.probe.probeHeight, settings.probe.budget,
-				settings.probe.radius);
-			SOF_LOG("Config debug: ReloadKey=0x%X ProbeKey=0x%X GrassCensusKey=0x%X GrassHideTestKey=0x%X LogMap=%d ProbePhysics=%d PhysicsProbeDelay=%.2fms",
-				settings.debug.reloadKey, settings.debug.probeKey, settings.debug.grassCensusKey, settings.debug.grassHideTestKey,
-				settings.debug.logMap, settings.debug.probePhysics, settings.debug.physicsProbeDelay);
-		}
-
 		// Reads the INI from `Load` into fresh settings. A missing key keeps its default.
 		Settings ReadSettings() {
 			Settings settings;
@@ -114,9 +105,7 @@ namespace sof::config {
 	void Load(const std::string& iniPath) {
 		g_iniPath = iniPath;
 		g_settings = ReadSettings();
-
-		SOF_LOG("Config loaded from '%s'.", g_iniPath.c_str());
-		LogSettings(g_settings);
+		SOF_LOG("Loaded config from path '%s'.", g_iniPath.c_str());
 	}
 
 	// Reads the INI from `Load` again, makes its settings current and logs them.
@@ -124,9 +113,7 @@ namespace sof::config {
 	// Thread: Main
 	void Reload() {
 		g_settings = ReadSettings();
-
-		SOF_LOG("Config reloaded from '%s'.", g_iniPath.c_str());
-		LogSettings(g_settings);
+		SOF_LOG("Reloaded config from path '%s'.", g_iniPath.c_str());
 	}
 
 	// Returns the current settings. A reload changes them in place.
