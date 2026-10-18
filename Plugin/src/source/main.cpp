@@ -42,6 +42,12 @@ namespace {
 			sof::occlusion::ResetBuilder();
 			break;
 
+		// Stops the async worker before the game shuts Havok down.
+		case NVSEMessagingInterface::kMessage_ExitGame:
+		case NVSEMessagingInterface::kMessage_ExitGame_Console:
+			sof::occlusion::ResetBuilder();
+			break;
+
 		default:
 			break;
 		}
