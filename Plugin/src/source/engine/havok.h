@@ -41,8 +41,17 @@ namespace sof::engine {
 		void* object = nullptr;  // NiAVObject*
 		void* reference = nullptr;  // TESObjectREFR*, null for terrain and objects without a reference
 		std::uint8_t layer = 0;  // Collision layer of the object that was hit
+		bool faulted = false;  // The engine pick raised an exception
 	};
 
 	RaycastResult CastRay(const Vector3& from, const Vector3& to, std::uint8_t layer);
+	RaycastResult CastRayInCell(void* cell, const Vector3& from, const Vector3& to, std::uint8_t layer);
+
+	std::uint32_t GetPickFaultCount();
+
+	bool InitializeHavokThread(const char* name);
+
+	bool LockHavok();
+	void UnlockHavok();
 
 }
