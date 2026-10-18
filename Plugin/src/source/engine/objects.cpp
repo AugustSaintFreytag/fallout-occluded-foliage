@@ -3,6 +3,8 @@
 #include "engine/addresses.h"
 #include "utils/memory.h"
 
+#include <cstring>
+
 namespace sof::engine {
 
 	using mem::Field;
@@ -163,6 +165,18 @@ namespace sof::engine {
 		}
 
 		return path;
+	}
+
+	// Checks if the model of a given base form lies in the `Markers` mesh folder.
+	// Marker meshes are editor only and never load 3D in game.
+	bool HasMarkerModel(void* baseForm) {
+		const char* path = GetModelPath(baseForm);
+
+		if (_strnicmp(path, "meshes\\", 7) == 0) {
+			path += 7;
+		}
+
+		return _strnicmp(path, "markers\\", 8) == 0;
 	}
 
 }

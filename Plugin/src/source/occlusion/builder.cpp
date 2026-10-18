@@ -93,6 +93,10 @@ namespace sof::occlusion {
 			std::size_t probes = 0;  // Main thread and worker
 		};
 
+		// Frames the loaded cell set must stay the same before the worker runs.
+		// Cells that attach likely add their collision to the Havok world without the global lock. Not verified.
+		constexpr std::uint32_t kWorkerSettleFrames = 30;
+
 		// Scan runs with fewer probes are not logged.
 		constexpr std::size_t kMinLoggedScanProbes = 1000;
 
@@ -113,6 +117,7 @@ namespace sof::occlusion {
 		bool g_idle = false;
 
 		bool g_workerActive = false;
+		std::uint32_t g_framesSinceCellChange = 0;
 		std::size_t g_lastWorkerProbes = 0;
 		std::vector<ProbeOutcome> g_outcomes;
 		std::vector<ProbeTask> g_tasks;
@@ -238,27 +243,17 @@ namespace sof::occlusion {
 			return true;
 		}
 
-		bool AreAllLoadedCellsReady() {
-			for (const engine::LoadedCell& cell : g_loadedCells) {
-				const CellMap* map = FindCellMap(cell.x, cell.y);
-
-				if (!map || !map->ready) {
-					return false;
-				}
-			}
-
-			return !g_loadedCells.empty();
-		}
-
 		// Collects the world bounds of every enabled occluder in a given cell that has loaded 3D.
 		// Adds each enabled occluder without loaded 3D to the given list.
+		// Occluders with a marker model are left out. Their 3D never loads, so a cell would wait for the timeout.
 		// Returns the number of enabled occluders without loaded 3D.
 		std::size_t CollectOccluderBounds(void* cell, std::vector<engine::ReferenceBounds>& bounds,
 			std::vector<void*>& unloadedReferences) {
 			std::size_t unloaded = 0;
 
 			for (void* reference : engine::GetCellReferences(cell)) {
-				if (!probe::IsOccluder(reference) || engine::IsDisabledOrDeleted(reference)) {
+				if (!probe::IsOccluder(reference) || engine::IsDisabledOrDeleted(reference)
+					|| engine::HasMarkerModel(engine::GetBaseForm(reference))) {
 					continue;
 				}
 
@@ -871,7 +866,12 @@ namespace sof::occlusion {
 			g_lastWorkerProbes = g_outcomes.size();
 		}
 
-		const bool workerAllowed = settings.probe.async && !loadedCellsChanged && AreAllLoadedCellsReady();
+		g_framesSinceCellChange = loadedCellsChanged ? 0 : std::min(g_framesSinceCellChange + 1, kWorkerSettleFrames);
+
+		// The scan queues only grid points whose cell and border neighbours are ready.
+		// Cells still waiting for occluder 3D do not hold the worker back.
+		const bool workerAllowed = settings.probe.async && !g_loadedCells.empty()
+			&& g_framesSinceCellChange >= kWorkerSettleFrames;
 
 		if (g_workerActive && !workerAllowed) {
 			PauseAndRelease();
@@ -951,6 +951,7 @@ namespace sof::occlusion {
 		g_readinessChecks.clear();
 		g_statistics = {};
 		g_scanRun = {};
+		g_framesSinceCellChange = 0;
 		g_lastStatusTime = 0;
 		g_lastCoveredResolved = 0;
 		g_idleLogged = false;
