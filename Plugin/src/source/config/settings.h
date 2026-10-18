@@ -10,6 +10,10 @@ namespace sof::config {
 
 	struct GeneralSettings {
 		bool enabled = true;
+
+		// Keybind that toggles `enabled` until the next reload
+		// Virtual-key code (VK_END), 0 = no key
+		int toggleKey = 0x23;
 	};
 
 	struct ProbeSettings {
@@ -61,9 +65,6 @@ namespace sof::config {
 		// Log threads handling Havok physics ticks, time spent, and interference.
 		bool probePhysics = false;
 
-		// Lift occluded grass by 64 units instead of hiding it, to show the occlusion map in game.
-		bool liftGrass = false;
-
 		// Force stall physics worker thread in intervals, for debugging (ms).
 		// Use 0.0 to disable.
 		float physicsProbeDelay = 0.0f;
@@ -81,6 +82,7 @@ namespace sof::config {
 
 	void Reload();
 
+	bool ToggleEnabled();
 
 	std::vector<std::string> ReadOccluderBlacklist();
 

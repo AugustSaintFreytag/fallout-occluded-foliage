@@ -59,6 +59,7 @@ namespace sof::config {
 			GeneralSettings& general = settings.general;
 
 			general.enabled = ReadBool(iniPath, "General", "bEnabled", general.enabled);
+			general.toggleKey = ReadInt(iniPath, "General", "iToggleKey", general.toggleKey);
 		}
 
 		void LoadProbe(const char* iniPath, Settings& settings) {
@@ -91,7 +92,6 @@ namespace sof::config {
 			debug.grassHideTestKey = ReadInt(iniPath, "Debug", "iGrassHideTestKey", debug.grassHideTestKey);
 			debug.logMap = ReadBool(iniPath, "Debug", "bLogMap", debug.logMap);
 			debug.probePhysics = ReadBool(iniPath, "Debug", "bProbePhysics", debug.probePhysics);
-			debug.liftGrass = ReadBool(iniPath, "Debug", "bLiftGrass", debug.liftGrass);
 
 			const float physicsProbeDelay = ReadFloat(iniPath, "Debug", "fPhysicsProbeDelay", debug.physicsProbeDelay);
 			debug.physicsProbeDelay = std::clamp(physicsProbeDelay, 0.0f, 50.0f);
@@ -128,6 +128,16 @@ namespace sof::config {
 		SOF_LOG("Reloaded config from path '%s'.", g_iniPath.c_str());
 	}
 
+	// Flips `[General] bEnabled` in the current settings. The next reload sets it from the INI again.
+	// Returns the new state.
+	//
+	// Thread: Main
+	bool ToggleEnabled() {
+		g_settings.general.enabled = !g_settings.general.enabled;
+		SOF_LOG("Toggled %s.", g_settings.general.enabled ? "on" : "off");
+
+		return g_settings.general.enabled;
+	}
 
 	// Reads the editor IDs in section `[OccluderBlacklist]` of `OccludedFoliageForms.ini`, next to the main INI.
 	// One editor ID per line. Text after `;`, `#` or `=` is ignored.

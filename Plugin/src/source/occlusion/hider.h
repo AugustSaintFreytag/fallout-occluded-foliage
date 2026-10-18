@@ -8,6 +8,8 @@ namespace sof::occlusion {
 
 	void UpdateHider();
 
+	void RestoreHiddenGrass();
+
 	void ResetHider();
 
 }
