@@ -53,4 +53,36 @@ namespace sof::mem {
 		return previous;
 	}
 
+	// Redirects a `call rel32` at a given address to a replacement function.
+	// Patches only if the call goes to the expected target. Returns false otherwise or if the write failed.
+	//
+	// Thread: Main (load time only)
+	bool PatchCall(std::uintptr_t address, std::uintptr_t expectedTarget, void* replacement) {
+		auto* code = reinterpret_cast<std::uint8_t*>(address);
+
+		if (code[0] != 0xE8) {
+			return false;
+		}
+
+		const std::uintptr_t target = address + 5 + *reinterpret_cast<std::int32_t*>(code + 1);
+
+		if (target != expectedTarget) {
+			return false;
+		}
+
+		DWORD oldProtection = 0;
+
+		if (!VirtualProtect(code, 5, PAGE_EXECUTE_READWRITE, &oldProtection)) {
+			return false;
+		}
+
+		*reinterpret_cast<std::int32_t*>(code + 1) =
+			static_cast<std::int32_t>(reinterpret_cast<std::uintptr_t>(replacement) - (address + 5));
+
+		VirtualProtect(code, 5, oldProtection, &oldProtection);
+		FlushInstructionCache(GetCurrentProcess(), code, 5);
+
+		return true;
+	}
+
 }
