@@ -37,6 +37,7 @@ namespace sof::probe {
 		float terrainHeight = 0.0f;  // Game units
 		void* occluder = nullptr;  // TESObjectREFR* of the occluder, null unless occluded
 		bool foundByUpRay = false;
+		bool faulted = false;  // An engine pick raised an exception. The verdict is not valid.
 		int casts = 0;
 	};
 
@@ -44,6 +45,6 @@ namespace sof::probe {
 
 	bool IsOccluder(void* reference);
 
-	ProbeResult ProbePoint(float x, float y, float probeHeight, const TraceCallback& trace = {});
+	ProbeResult ProbePoint(void* cell, float x, float y, float terrainHeight, float probeHeight, const TraceCallback& trace = {});
 
 }
