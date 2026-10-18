@@ -56,6 +56,9 @@ namespace sof::engine {
 	constexpr std::uintptr_t kRefr_InDisabledSet = 0x5AA630;
 	constexpr std::uintptr_t kForm_TypeID = 0x04;  // UInt8
 	constexpr std::uintptr_t kForm_RefID = 0x0C;
+
+	// Form IDs below are engine built-ins, such as `XMarker` (0x3B), `MapMarker` (0x10) and `CollisionMarker` (0x21). (RUN)
+	constexpr std::uint32_t kPluginHeadFormID = 0x800;
 	constexpr std::uintptr_t kFormVtbl_GetEditorID = 0x130;  // const char* (__thiscall*)() (JIP)
 
 	constexpr std::uint8_t kFormType_TESObjectACTI = 0x15;
